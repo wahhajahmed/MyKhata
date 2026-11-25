@@ -7,6 +7,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'windows-fingerprint.ps1')
+
 function Fail([string]$Message) {
   throw $Message
 }
@@ -60,10 +62,10 @@ try {
   }
 
   if (-not [string]::IsNullOrWhiteSpace($env:MYKHATA_WINDOWS_CERT_SHA256)) {
-    $expected = ($env:MYKHATA_WINDOWS_CERT_SHA256 -replace '[^A-Fa-f0-9]', '').ToUpperInvariant()
-    $actual = ($certificate.Thumbprint -replace '[^A-Fa-f0-9]', '').ToUpperInvariant()
+    $expected = Normalize-WindowsCertificateFingerprint $env:MYKHATA_WINDOWS_CERT_SHA256
+    $actual = Get-WindowsCertificateSha256 -Certificate $certificate
     if ($actual -ne $expected) {
-      Fail 'The Windows certificate thumbprint does not match the pinned identity.'
+      Fail 'The Windows certificate SHA-256 fingerprint does not match the pinned identity.'
     }
   }
 } finally {

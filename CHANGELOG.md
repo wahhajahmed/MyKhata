@@ -11,9 +11,13 @@ All notable changes to MyKhata are documented here. The format follows Keep a Ch
 - SHA-256 checksums are generated for every release artifact, and only verified, signed artifacts are uploaded. GitHub drafts are created only after all verification jobs pass and are never published automatically.
 - Android production builds require a complete existing keystore through protected environment variables and pin its certificate SHA-256 fingerprint so a replacement keystore cannot be used silently.
 
+### Fixed
+
+- Windows release fingerprint validation now hashes the signing certificate's DER-encoded bytes with SHA-256 instead of comparing `X509Certificate2.Thumbprint`, which is SHA-1. Tests prove correct, colon-separated lowercase and incorrect fingerprints are handled correctly by both signing scripts.
+
 ### Verification
 
-- Workflow YAML passes `actionlint 1.7.12`; PowerShell and Bash helper scripts pass syntax checks. Negative-path checks confirm missing secrets, unsigned Windows installers, and missing signed Android outputs are rejected. Deleted temporary test fixtures confirmed Windows PFX and Android keystore credential validation. Full signed verification requires real credentials and has not been run locally.
+- Workflow YAML passes `actionlint 1.7.12`; PowerShell and Bash helper scripts pass syntax checks. Negative-path checks confirm missing secrets, unsigned Windows installers, and missing signed Android outputs are rejected. Deleted temporary test fixtures confirmed Windows PFX and Android keystore credential validation. A deleted self-signed test certificate proved both Windows scripts accept the correct SHA-256 DER fingerprint and reject an incorrect one. Full signed verification with production credentials has not been run locally.
 
 ### Manual release checks
 

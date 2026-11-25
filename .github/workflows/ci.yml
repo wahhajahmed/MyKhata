@@ -54,6 +54,9 @@ jobs:
         run: npm run rebuild:electron
       - name: Build Windows installer
         run: npm run desktop:build
+      - name: Verify Windows SHA-256 fingerprint checks
+        shell: pwsh
+        run: .github/scripts/tests/windows-fingerprint.test.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer-unsigned

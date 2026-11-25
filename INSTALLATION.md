@@ -89,9 +89,26 @@ Install it with `adb install -r android/app/build/outputs/apk/debug/app-debug.ap
 Production release builds are signed and verified by the manual release workflow; unsigned release artifacts are never uploaded. It requires these protected repository secrets:
 
 - Android: `MYKHATA_KEYSTORE_BASE64`, `MYKHATA_KEYSTORE_PASSWORD`, `MYKHATA_KEY_ALIAS`, `MYKHATA_KEY_PASSWORD`, and `MYKHATA_KEYSTORE_CERT_SHA256`.
-- Windows: `MYKHATA_WINDOWS_CSC_BASE64` and `MYKHATA_WINDOWS_CSC_PASSWORD`; `MYKHATA_WINDOWS_CERT_SHA256` is an optional thumbprint pin.
+- Windows: `MYKHATA_WINDOWS_CSC_BASE64` and `MYKHATA_WINDOWS_CSC_PASSWORD`; `MYKHATA_WINDOWS_CERT_SHA256` is an optional SHA-256 certificate fingerprint pin.
 
-The workflow fails before any build if a required secret is missing or invalid. It validates the existing keystore alias and pins the certificate fingerprint so a replacement keystore is rejected. Do not generate a new keystore to satisfy the workflow: recover the original signing material, or make a deliberate key-rotation decision outside this release path. `versionCode` and `versionName` are derived from the release tag.
+Generate the Windows pin from the DER-encoded signing certificate (do **not** use the SHA-1 `Thumbprint`):
+
+```powershell
+$pfx = 'C:\secure\mykhata-code-signing.pfx'
+$password = Read-Host -AsSecureString 'PFX password'
+$cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx, $password)
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+try {
+  ([BitConverter]::ToString($sha256.ComputeHash($cert.RawData)) -replace '-', '').ToUpperInvariant()
+} finally {
+  $sha256.Dispose()
+  $cert.Dispose()
+}
+```
+
+Store the 64-character hexadecimal output as `MYKHATA_WINDOWS_CERT_SHA256`. Colons and spaces in the configured value are ignored, and lowercase is accepted.
+
+The workflow fails before any build if a required secret is missing or invalid. It validates the existing keystore alias and pins the Android certificate fingerprint so a replacement keystore is rejected. It also compares the Windows SHA-256 DER fingerprint in both the pre-build credential check and the signed-installer verification. Do not generate a new keystore to satisfy the workflow: recover the original signing material, or make a deliberate key-rotation decision outside this release path. `versionCode` and `versionName` are derived from the release tag.
 
 ### Android build notes
 
