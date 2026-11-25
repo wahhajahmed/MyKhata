@@ -24,6 +24,7 @@ This document describes the guarantees implemented in MyKhata 0.2.0. It is not a
 - **Attachments.** Receipts/invoices are stored as BLOBs inside the encrypted SQLite database, capped at 10 MiB with a MIME/extension allowlist. They are included in encrypted backups and never uploaded automatically.
 - **Electron boundary.** `contextIsolation` is enabled, `nodeIntegration` is disabled, the production build ships a strict Content-Security-Policy, external links are restricted to HTTPS, arbitrary filesystem IPC has been removed, and IPC handlers validate the sender. Native SQLite stays in the main process; the renderer receives a fixed preload API, not Node access.
 - **Android hardening.** Device backup of app data is disabled, FileProvider paths are restricted to specific subdirectories, and SQLCipher is used once the user enables app lock.
+- **Signed release gate.** The manual release workflow validates signing material before builds, verifies Windows Authenticode signatures with SignTool and Android APK/AAB signatures with `apksigner`/`jarsigner`, checks package identity and versions, generates SHA-256 checksums, uploads only verified artifacts, and creates draft releases only. It never publishes automatically.
 - **Optional sync.** Sync is off by default. Consent text enumerates exactly which fields are uploaded (names, contact details, notes, amounts, descriptions, ids). Remote changes are never applied silently; conflicts are reported and do not advance the sync watermark.
 
 ## Current limitations
@@ -33,9 +34,9 @@ This document describes the guarantees implemented in MyKhata 0.2.0. It is not a
 - **Plain SQL dumps are unencrypted** and intended for advanced manual use only.
 - **Supabase keys are client-side.** Only a public anon key may be used. Never put a service-role/secret key in `.env`, source code, or release artifacts. Configure row-level security and per-user access policy in your own Supabase project before enabling sync.
 - **The Electron renderer still has an application SQL bridge.** It is sender-checked, lock-gated, and CSP-protected, but a complete renderer compromise is not equivalent to a hardened native app. Do not install untrusted extensions or browse untrusted sites with the same OS account.
-- **Android SQLCipher/biometric flows are not hardware-verified in CI.** Automated builds and typechecks pass; on-device verification is a manual release step until test devices are available. Real-device offline verification was not performed.
-- **Desktop offline behavior was not exercised in airplane mode.** The app uses a local SQLite file and has no required network dependency, but no automated offline UI test was run.
-- **Release artifacts are unsigned until signing credentials are supplied.** Windows SmartScreen may warn and Android will require an explicit unknown-source install for unsigned builds. Release workflow drafts are never published automatically.
+- **Physical Android SQLCipher, biometric and airplane-mode checks remain manual release checks.** Physical unlock-after-restart with SQLCipher, biometric unlock, and airplane-mode offline operation on Android and Windows have not been demonstrated with device evidence. Automated builds, typechecks and unit tests do not verify them, so they must be completed manually before publishing.
+- **Local verification builds are unsigned.** The manual release workflow is deny-by-default: required Windows/Android signing secrets must validate before builds, both platforms must pass signature and identity verification, and only verified artifacts are uploaded. GitHub releases are created as drafts only and are never published automatically.
+- **Android keystore identity is pinned.** The release workflow requires `MYKHATA_KEYSTORE_CERT_SHA256` and rejects a different keystore certificate rather than silently using a replacement key.
 - The project has automated tests but has not undergone an independent penetration test or cryptographic audit.
 
 ## Reporting sensitive issues

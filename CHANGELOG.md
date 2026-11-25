@@ -2,6 +2,23 @@
 
 All notable changes to MyKhata are documented here. The format follows Keep a Changelog-style categories.
 
+## [Unreleased]
+
+### Changed
+
+- The manual release workflow is now deny-by-default: Windows and Android signing credentials must exist and validate before any build starts; missing or invalid credentials fail the workflow.
+- Windows installers are verified with SignTool Authenticode verification and product/version identity checks. Android APKs are verified with `apksigner`, AABs with `jarsigner`/`keytool` plus `bundletool` manifest parsing, and both are checked against `com.mykhata.app`, versionName and versionCode.
+- SHA-256 checksums are generated for every release artifact, and only verified, signed artifacts are uploaded. GitHub drafts are created only after all verification jobs pass and are never published automatically.
+- Android production builds require a complete existing keystore through protected environment variables and pin its certificate SHA-256 fingerprint so a replacement keystore cannot be used silently.
+
+### Verification
+
+- Workflow YAML passes `actionlint 1.7.12`; PowerShell and Bash helper scripts pass syntax checks. Negative-path checks confirm missing secrets, unsigned Windows installers, and missing signed Android outputs are rejected. Deleted temporary test fixtures confirmed Windows PFX and Android keystore credential validation. Full signed verification requires real credentials and has not been run locally.
+
+### Manual release checks
+
+- Physical Android SQLCipher unlock-after-restart, physical biometric unlock, and airplane-mode offline operation on Android and Windows remain manual release checks until device evidence is provided.
+
 ## [0.1.0] — 2026-11-26
 
 ### Added
@@ -45,7 +62,7 @@ All notable changes to MyKhata are documented here. The format follows Keep a Ch
 - Optional Android biometric unlock using OS-protected secret storage.
 - Receipt/invoice attachments stored as validated BLOBs inside the encrypted database, with per-transaction picker, open/download and delete UI.
 - Strict encrypted-backup envelope validation with distinct wrong-password/corrupt/unsupported/invalid reasons, dump validation before restore, and FK-safe restore ordering.
-- GitHub Actions CI for typechecks, tests, web build, Windows installer and Android debug verification; manual draft-gate release workflow with optional signing secrets and release-tag-derived Android versioning.
+- GitHub Actions CI for typechecks, tests, web build, Windows installer and Android debug verification; manual draft-gate release workflow with release-tag-derived Android versioning (mandatory signing is enforced in the Unreleased gate above).
 - Regression tests for settlement reversals, idempotency conflicts, statement sign/date handling, multi-currency postings, backup failure modes, migration versioning, PIN policy and the lock screen.
 
 ### Changed
@@ -86,6 +103,6 @@ Commands run locally on Windows before release preparation:
 ### Notes
 
 - Cloud sync remains opt-in and disabled by default.
-- Signed artifacts require signing credentials; the release workflow produces a draft release with unsigned builds otherwise.
+- At commit `e1475fd`, unsigned production builds were still possible; the Unreleased release gate above now supersedes that behaviour and requires signed, verified artifacts.
 - Android SQLCipher/biometric on-device testing, real-device offline testing, and independent security review remain manual follow-ups; automated builds and typechecks are not device verification.
 - The Windows and Android artifacts are unsigned and were not published.

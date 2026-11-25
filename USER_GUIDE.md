@@ -20,6 +20,7 @@ Use the sidebar on desktop/tablet and the bottom navigation on phones. The heade
 - On Android, if the device has enrolled biometrics, **Enable biometrics** in Settings lets you unlock with fingerprint/face instead of typing the PIN. Biometrics are a convenience; the PIN remains the recovery credential.
 - **Change PIN** requires the current PIN. **Disable lock** also requires the current PIN and converts the database back to plaintext; only do this on a protected device.
 - A forgotten PIN cannot be recovered from the encrypted database. Restore from an encrypted backup instead.
+- Physical Android SQLCipher unlock-after-restart, biometric unlock and airplane-mode offline operation remain manual release checks until device evidence is provided; automated builds do not prove them.
 
 ## Dashboard
 

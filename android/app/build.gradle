@@ -1,5 +1,19 @@
 apply plugin: 'com.android.application'
 
+// Production releases must be signed. Local development can omit this property.
+def releaseSigningRequired = project.findProperty('mykhataRequireReleaseSigning')?.toString()?.toBoolean() ?: false
+def releaseKeystore = System.getenv('MYKHATA_KEYSTORE_FILE')
+def releaseStorePassword = System.getenv('MYKHATA_KEYSTORE_PASSWORD')
+def releaseKeyAlias = System.getenv('MYKHATA_KEY_ALIAS')
+def releaseKeyPassword = System.getenv('MYKHATA_KEY_PASSWORD')
+
+if (releaseSigningRequired) {
+    def missing = [releaseKeystore, releaseStorePassword, releaseKeyAlias, releaseKeyPassword].any { !it }
+    if (missing || !file(releaseKeystore).exists()) {
+        throw new GradleException('Production release signing requires a complete, existing Android keystore configuration from protected environment variables.')
+    }
+}
+
 android {
     namespace "com.mykhata.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -20,12 +34,11 @@ android {
     signingConfigs {
         release {
             // Credentials are supplied only by CI/release secrets. Never commit a keystore.
-            def store = System.getenv('MYKHATA_KEYSTORE_FILE')
-            if (store) {
-                storeFile file(store)
-                storePassword System.getenv('MYKHATA_KEYSTORE_PASSWORD')
-                keyAlias System.getenv('MYKHATA_KEY_ALIAS')
-                keyPassword System.getenv('MYKHATA_KEY_PASSWORD')
+            if (releaseKeystore) {
+                storeFile file(releaseKeystore)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
             }
         }
     }
@@ -33,7 +46,7 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            if (System.getenv('MYKHATA_KEYSTORE_FILE')) {
+            if (releaseKeystore) {
                 signingConfig signingConfigs.release
             }
         }

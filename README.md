@@ -57,10 +57,11 @@ See [INSTALLATION.md](INSTALLATION.md) for Windows installer and Android APK bui
 
 | Target | Output |
 | --- | --- |
-| Windows NSIS installer | `release/MyKhata Setup 0.2.0.exe` (unsigned until a certificate is supplied) |
-| Android release APK/AAB | `android/app/build/outputs/apk/release/app-release-unsigned.apk` and `android/app/build/outputs/bundle/release/app-release.aab` (unsigned until a keystore is supplied) |
+| Windows NSIS installer (local verification build) | `release/MyKhata Setup 0.2.0.exe` — unsigned; not a release artifact |
+| Android release APK/AAB (local verification build) | `android/app/build/outputs/apk/release/app-release-unsigned.apk` and `android/app/build/outputs/bundle/release/app-release.aab` — unsigned; not release artifacts |
 | Android debug APK | `android/app/build/outputs/apk/debug/app-debug.apk` |
 | Web application | `dist/` |
+| Signed production artifacts | Created only by the manual release workflow after credential validation, signature/identity verification and SHA-256 checksum generation; uploaded as draft-only artifacts |
 
 Build outputs, local databases, backups, environment files, and credentials are ignored by Git.
 
@@ -76,4 +77,4 @@ Build outputs, local databases, backups, environment files, and credentials are 
 
 ## Security
 
-Never commit local database files, backups, credentials, API keys, or real financial data. Backups are encrypted with a passphrase that is never stored. Cloud sync uses only a public anon key from a local environment file and requires explicit user approval. Database-at-rest encryption and app lock are opt-in on desktop/Android; browser mode only gates the UI. Release/code signing and on-device biometric verification remain pending; see [SECURITY.md](SECURITY.md).
+Never commit local database files, backups, credentials, API keys, or real financial data. Backups are encrypted with a passphrase that is never stored. Cloud sync uses only a public anon key from a local environment file and requires explicit user approval. Database-at-rest encryption and app lock are opt-in on desktop/Android; browser mode only gates the UI. Release signing is mandatory in the workflow but still requires protected credentials; physical Android SQLCipher, biometric and airplane-mode verification remain manual checks; see [SECURITY.md](SECURITY.md).

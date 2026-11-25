@@ -86,4 +86,6 @@ Vitest covers decimal arithmetic, receivables/payables, installments, overpaymen
 | Electron main | `npm run electron:build-main` | `dist-electron/` |
 | Windows installer | `npm run desktop:build` | `release/MyKhata Setup 0.2.0.exe` |
 | Android debug APK | `assembleDebug` | `android/app/build/outputs/apk/debug/app-debug.apk` |
-| Android release APK/AAB | release workflow (`assembleRelease bundleRelease`) | `android/app/build/outputs/{apk,bundle}/release/` |
+| Android release APK/AAB | release workflow (`assembleRelease bundleRelease`) | `android/app/build/outputs/{apk,bundle}/release/`; verified copies in `release/verified-android/` |
+
+The manual release workflow is deny-by-default. It validates Windows and Android signing credentials before any build, rejects missing secrets, pins the Android keystore certificate fingerprint, verifies signatures with SignTool/`apksigner`/`jarsigner`, parses `bundletool` manifest output, checks package identity and release versions, generates `SHA256SUMS.txt`, uploads only verified artifacts, and creates a draft GitHub release without publishing it.

@@ -58,6 +58,8 @@ The installer allows choosing the installation directory and creates a desktop s
 
 If `better-sqlite3-multiple-ciphers` fails to load, rerun `npm run rebuild:electron` with the same Node/Electron versions used to build the app. `npm run desktop:build` performs this rebuild automatically.
 
+This local command produces an unsigned verification build. Production installers are produced by the manual release workflow with protected `MYKHATA_WINDOWS_CSC_BASE64` and `MYKHATA_WINDOWS_CSC_PASSWORD` secrets and are verified with SignTool before upload.
+
 ## 4. Android (Capacitor)
 
 The Android project is already present in `android/`. Rebuild it after changing web assets or Capacitor plugins:
@@ -82,9 +84,14 @@ The debug APK is written to:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Install it with `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` or copy it to the device. The debug APK is unsigned for distribution; generate a release keystore and signing configuration before publishing to a store. Never commit a keystore or signing credentials.
+Install it with `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` or copy it to the device. The debug APK is unsigned for distribution; publishing requires the existing release keystore and signing configuration. Never replace an existing production keystore without a deliberate key-rotation decision, and never commit a keystore or signing credentials.
 
-For release builds, the release workflow accepts base64-encoded signing material in `MYKHATA_KEYSTORE_BASE64`, `MYKHATA_KEYSTORE_PASSWORD`, `MYKHATA_KEY_ALIAS`, and `MYKHATA_KEY_PASSWORD`. Without these secrets it produces an unsigned `assembleRelease`/`bundleRelease` build and labels it as such. It also derives `versionCode`/`versionName` from the release tag.
+Production release builds are signed and verified by the manual release workflow; unsigned release artifacts are never uploaded. It requires these protected repository secrets:
+
+- Android: `MYKHATA_KEYSTORE_BASE64`, `MYKHATA_KEYSTORE_PASSWORD`, `MYKHATA_KEY_ALIAS`, `MYKHATA_KEY_PASSWORD`, and `MYKHATA_KEYSTORE_CERT_SHA256`.
+- Windows: `MYKHATA_WINDOWS_CSC_BASE64` and `MYKHATA_WINDOWS_CSC_PASSWORD`; `MYKHATA_WINDOWS_CERT_SHA256` is an optional thumbprint pin.
+
+The workflow fails before any build if a required secret is missing or invalid. It validates the existing keystore alias and pins the certificate fingerprint so a replacement keystore is rejected. Do not generate a new keystore to satisfy the workflow: recover the original signing material, or make a deliberate key-rotation decision outside this release path. `versionCode` and `versionName` are derived from the release tag.
 
 ### Android build notes
 
@@ -131,4 +138,6 @@ npx cap sync android
 
 Results: both typechecks passed, 60 tests passed, the Windows installer and all Android targets built successfully, and production output contains no source maps. Exact results and limitations are recorded in `CHANGELOG.md`.
 
-Signed artifacts require signing secrets; the release workflow otherwise produces clearly labelled unsigned builds and a draft GitHub release. Real-device Android encryption/biometric and offline checks remain manual release steps.
+Signed release artifacts are produced only by the manual workflow after credential validation, SignTool/`apksigner`/`jarsigner` verification, package/version checks and SHA-256 checksum generation. That workflow creates a GitHub draft only and never publishes it automatically.
+
+Physical Android SQLCipher unlock-after-restart, physical biometric unlock and airplane-mode offline checks on Android and Windows remain manual release checks until device evidence is provided. Automated builds and tests do not substitute for those checks.
