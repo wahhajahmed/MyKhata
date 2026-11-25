@@ -2,56 +2,75 @@
 
 Professional Offline-First Personal Finance and Digital Khata Management Application.
 
-MyKhata is a cross-platform personal accounting system for maintaining every financial relationship in one place: people and companies, digital khata (receivables and payables), projects, bank accounts, cash, digital wallets, income and expenses, multi-currency transactions, reports, and PDF statements. It works fully offline with a local SQLite database; cloud synchronization is optional.
+MyKhata is a cross-platform personal accounting system for people and companies, digital khata (receivables and payables), projects, bank accounts, cash, wallets, income, expenses, multi-currency transactions, reports, and PDF statements. It works fully offline with a local SQLite database; cloud synchronization is optional and disabled by default. Every dashboard figure and statement is calculated from real posted entries — there are no demo users, sample balances, or hardcoded financial numbers.
 
-> **Status:** under active development. See [CHANGELOG.md](CHANGELOG.md) for implemented features and [SECURITY.md](SECURITY.md) for verified security guarantees.
+> **Version 0.1.0:** implementation and verification complete. See [CHANGELOG.md](CHANGELOG.md) and [SECURITY.md](SECURITY.md) for exact guarantees and limitations.
 
 ## Core principles
 
 - Offline first — local CRUD never requires an internet connection
-- Local data ownership — your financial data lives in your local SQLite database
-- Financial accuracy — decimal arithmetic and balanced ledger entries
-- Optional cloud synchronization — never required for normal use
-- Cross-platform — Windows (Electron) and Android (Capacitor) share one TypeScript codebase
+- Local data ownership — records live in a local SQLite database
+- Financial accuracy — immutable decimal arithmetic and balanced double-entry journals
+- Immutable history — corrections are posted as reversals/refunds, not silent edits
+- Optional cloud synchronization — never required or activated automatically
+- Cross-platform — Windows (Electron), Android (Capacitor), and browser development share one TypeScript codebase
 
-## Planned feature set
+## Implemented features
 
-- People & companies with individual digital ledgers
-- Receivables and payables tracked independently, with partial payments and installments
-- Project and client management with per-project statements
-- Bank accounts, cash in hand, Easypaisa/JazzCash/custom wallets and account transfers
-- Income, expenses and customizable categories
-- Multi-currency support with offline manual exchange rates and rate snapshots
-- Dashboard, analytics and printable reports
-- Offline PDF statements
-- Encrypted backup/restore, audit history, optional Supabase sync
+- People and companies with individual digital khata ledgers
+- Receivables and payables with partial payments, installments, and overpayment controls
+- Projects and clients with per-project statements and progress tracking
+- Bank accounts, cash, wallets, account transfers, and derived real balances
+- Income, expenses, categories, refunds, adjustments, and reversals
+- Multi-currency support with manual rate snapshots stored on each transaction
+- Dashboard, date presets, analytics, category/currency reports, and complete summaries
+- Local PDF statements with native Android sharing
+- Encrypted backup/restore, audit tables, duplicate prevention, and optional Supabase sync
+- Responsive light/dark interface with English and Urdu RTL modes
 
 ## Technology stack
 
-React, TypeScript, Vite, Tailwind CSS, Zustand, React Router, React Hook Form, Zod, Lucide, Recharts, SQLite (better-sqlite3 on desktop, Capacitor SQLite on Android), Electron, Capacitor, pdfmake, Vitest.
+React 18, TypeScript 5.6, Vite 5, Tailwind CSS 3, Zustand, React Router, React Hook Form, Zod, Lucide, Recharts, SQLite (`better-sqlite3` on desktop, Capacitor SQLite on Android, sql.js in the browser), Electron 33, Capacitor 6, pdfmake, Big.js, and Vitest.
 
 ## Repository layout
 
-- `src/` — shared React application, business logic, database layer and tests
+- `src/` — shared React application, business logic, database layer, and tests
 - `electron/` — Electron main process and secure preload bridge
-- `android/` — Capacitor Android project (generated during setup)
-- `docs` files at root — installation, architecture, database schema, user guide and security notes
+- `android/` — generated Capacitor Android project
+- Root documentation files — installation, architecture, schema, user guide, security, and changelog
 
-## Getting started
-
-See [INSTALLATION.md](INSTALLATION.md) for prerequisites and setup, and [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
+## Quick start
 
 ```bash
 npm install
 npm run dev          # browser development mode
-npm run test         # automated financial-engine tests
+npm test             # 25 automated engine/database/PDF/sync tests
+npm run typecheck    # application typecheck
 npm run desktop:dev  # Electron desktop application
 ```
 
+See [INSTALLATION.md](INSTALLATION.md) for Windows installer and Android APK build instructions.
+
+## Verification artifacts
+
+| Target | Output |
+| --- | --- |
+| Windows NSIS installer | `release/MyKhata Setup 0.1.0.exe` |
+| Android debug APK | `android/app/build/outputs/apk/debug/app-debug.apk` |
+| Web application | `dist/` |
+
+Build outputs, local databases, backups, environment files, and credentials are ignored by Git.
+
+## Documentation
+
+- [INSTALLATION.md](INSTALLATION.md)
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [DATABASE_SCHEMA.md](DATABASE_SCHEMA.md)
+- [USER_GUIDE.md](USER_GUIDE.md)
+- [SECURITY.md](SECURITY.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [.env.example](.env.example)
+
 ## Security
 
-Never commit local database files, backups, credentials, API keys or real financial data. Cloud sync is opt-in and uses only public anon/client keys from an environment template; service-role keys must never be shipped in the client.
-
-## License
-
-See repository settings. Do not publish release artifacts or screenshots before they are actually generated and verified.
+Never commit local database files, backups, credentials, API keys, or real financial data. Backups are encrypted with a passphrase that is never stored. Cloud sync uses only a public anon key from a local environment file and requires explicit user approval. Database-at-rest encryption, app lock, and release/code signing are not included in 0.1.0; see [SECURITY.md](SECURITY.md).
