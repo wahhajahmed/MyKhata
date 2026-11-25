@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, type Resolver } from 'react-hook-form';
-import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, FileText, Plus, RotateCcw, Search, Undo2 } from 'lucide-react';
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, FileText, Paperclip, Plus, RotateCcw, Search, Trash2, Undo2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { deleteAttachment, getAttachment, listAttachments, saveAttachment, type AttachmentMeta } from '../core/attachments';
 import { transactionSchema, type TransactionInput } from '../core/schemas';
 import { rateForDate, reverseTransaction } from '../core/services';
 import type { TransactionRow } from '../core/types';
@@ -18,6 +19,7 @@ export default function TransactionsPage({ kind }: { kind?: 'income' | 'expense'
   const [typeFilter, setTypeFilter] = useState(kind ?? 'all');
   const [open, setOpen] = useState(false);
   const [reversing, setReversing] = useState<TransactionRow | null>(null);
+  const [attachmentsFor, setAttachmentsFor] = useState<TransactionRow | null>(null);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -76,6 +78,7 @@ export default function TransactionsPage({ kind }: { kind?: 'income' | 'expense'
                 <td className="num px-4 py-2.5 text-xs text-slate-400">{txn.exchange_rate}</td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center gap-1">
+                    <button title="Attachments" aria-label="Attachments" onClick={() => setAttachmentsFor(txn)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-emerald-600 dark:hover:bg-navy-800"><Paperclip className="h-4 w-4" /></button>
                     {!txn.reversal_of && !['reversal', 'refund'].includes(txn.type) && (
                       <button title="Reverse" onClick={() => setReversing(txn)} className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"><Undo2 className="h-4 w-4" /></button>
                     )}
@@ -89,6 +92,7 @@ export default function TransactionsPage({ kind }: { kind?: 'income' | 'expense'
       </Card>
 
       <TransactionModal open={open} kind={kind} parties={parties} accounts={accounts} projects={projects} categories={categories} transactions={transactions} onClose={() => setOpen(false)} onSave={createTransaction} />
+      {attachmentsFor && <AttachmentsModal key={attachmentsFor.id} transaction={attachmentsFor} onClose={() => setAttachmentsFor(null)} />}
       <ConfirmDialog
         open={Boolean(reversing)}
         message={`Reverse this ${reversing?.type.replace(/_/g, ' ') ?? ''} of ${reversing ? fmt(reversing.amount, reversing.currency) : ''}? The original entry is preserved and a balanced reversing entry is posted.`}
@@ -107,6 +111,128 @@ export default function TransactionsPage({ kind }: { kind?: 'income' | 'expense'
 function LinkToStatement({ id }: { id: string | null }) {
   if (!id) return <span className="inline-block w-6" />;
   return <a href={`#/statements?party=${id}`} title="Statement" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-emerald-600 dark:hover:bg-navy-800"><FileText className="h-4 w-4" /></a>;
+}
+
+function formatAttachmentSize(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function mimeForAttachment(fileName: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase();
+  if (ext === 'png' || ext === 'webp') return `image/${ext}`;
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  return 'application/pdf';
+}
+
+function AttachmentsModal({ transaction, onClose }: { transaction: TransactionRow; onClose: () => void }) {
+  const { adapter, notify } = useAppStore();
+  const [items, setItems] = useState<AttachmentMeta[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const urlsRef = useRef<Record<string, string>>({});
+
+  useEffect(() => () => {
+    Object.values(urlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+  }, []);
+
+  useEffect(() => {
+    if (!adapter) return;
+    void listAttachments(adapter, transaction.id)
+      .then(setItems)
+      .catch((error) => notify(errorMessage(error), 'error'));
+  }, [adapter, transaction.id, notify]);
+
+  async function addFiles(files: FileList | null): Promise<void> {
+    if (!adapter || !files?.length) return;
+    setBusy(true);
+    try {
+      for (const file of Array.from(files)) {
+        const data = new Uint8Array(await file.arrayBuffer());
+        await saveAttachment(adapter, transaction.id, { name: file.name, mimeType: file.type || 'application/octet-stream', data });
+      }
+      if (inputRef.current) inputRef.current.value = '';
+      setItems(await listAttachments(adapter, transaction.id));
+      notify(`Saved ${files.length} attachment${files.length === 1 ? '' : 's'}`);
+    } catch (error) { notify(errorMessage(error), 'error'); }
+    finally { setBusy(false); }
+  }
+
+  async function prepareLink(item: AttachmentMeta): Promise<void> {
+    if (!adapter) return;
+    setBusy(true);
+    try {
+      const found = await getAttachment(adapter, item.id);
+      if (!found) { notify('Attachment not found', 'error'); return; }
+      const type = found.meta.mimeType === 'application/octet-stream' ? mimeForAttachment(found.meta.fileName) : found.meta.mimeType;
+      const url = URL.createObjectURL(new Blob([found.data as BlobPart], { type }));
+      const previous = urlsRef.current[item.id];
+      if (previous) URL.revokeObjectURL(previous);
+      urlsRef.current = { ...urlsRef.current, [item.id]: url };
+      setUrls(urlsRef.current);
+    } catch (error) { notify(errorMessage(error), 'error'); }
+    finally { setBusy(false); }
+  }
+
+  async function remove(item: AttachmentMeta): Promise<void> {
+    if (!adapter) return;
+    setBusy(true);
+    try {
+      await deleteAttachment(adapter, item.id);
+      const previous = urlsRef.current[item.id];
+      if (previous) URL.revokeObjectURL(previous);
+      const next = { ...urlsRef.current };
+      delete next[item.id];
+      urlsRef.current = next;
+      setUrls(next);
+      setItems(await listAttachments(adapter, transaction.id));
+      notify('Attachment deleted');
+    } catch (error) { notify(errorMessage(error), 'error'); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Attachments · ${shortId(transaction.id)}`} wide>
+      <div className="space-y-4">
+        <Field label="Add local files" hint="PDF, PNG, JPEG or WebP · up to 10 MiB each. Files stay in this device's database and encrypted backups.">
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            disabled={busy}
+            accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
+            onChange={(event) => void addFiles(event.target.files)}
+            className="block w-full text-xs text-slate-500 file:me-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-emerald-700 dark:file:bg-navy-800 dark:file:text-emerald-300"
+          />
+        </Field>
+        {items.length ? (
+          <ul className="divide-y divide-slate-100 dark:divide-navy-800">
+            {items.map((item) => (
+              <li key={item.id} className="flex flex-wrap items-center gap-2 py-2.5 text-sm">
+                <Paperclip className="h-4 w-4 shrink-0 text-slate-400" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium text-slate-800 dark:text-slate-100">{item.fileName}</p>
+                  <p className="text-xs text-slate-400">{formatAttachmentSize(item.size)} · {item.mimeType}</p>
+                </div>
+                {urls[item.id] ? (
+                  <>
+                    <a href={urls[item.id]} target="_blank" rel="noopener noreferrer" className="rounded-lg px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-navy-800">Open</a>
+                    <a href={urls[item.id]} download={item.fileName} className="rounded-lg px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-navy-800">Download</a>
+                  </>
+                ) : (
+                  <Button type="button" variant="ghost" className="px-2 py-1 text-xs" disabled={busy} onClick={() => void prepareLink(item)}>Open</Button>
+                )}
+                <button title="Delete attachment" aria-label={`Delete ${item.fileName}`} disabled={busy} onClick={() => void remove(item)} className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950"><Trash2 className="h-4 w-4" /></button>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="py-6 text-center text-sm text-slate-400">No attachments yet. Choose a local receipt or invoice above.</p>}
+        <div className="flex justify-end"><Button variant="outline" onClick={onClose}>Done</Button></div>
+      </div>
+    </Modal>
+  );
 }
 
 function ConfirmDialog({ open, message, onCancel, onConfirm }: { open: boolean; message: string; onCancel: () => void; onConfirm: () => void }) {
@@ -132,13 +258,13 @@ function TransactionModal({ open, kind, parties, accounts, projects, categories,
   onClose: () => void;
   onSave: (input: TransactionInput) => Promise<{ duplicate: boolean }>;
 }) {
-  const { notify, adapter } = useAppStore();
+  const { notify, adapter, baseCurrency } = useAppStore();
   const [busy, setBusy] = useState(false);
   const [type, setType] = useState<FormType>(kind ?? 'income');
   const form = useForm<TransactionInput>({
     resolver: zodResolver(transactionSchema) as unknown as Resolver<TransactionInput>,
     defaultValues: {
-      type: kind ?? 'income', date: today(), amount: '', currency: 'PKR', exchangeRate: '1',
+      type: kind ?? 'income', date: today(), amount: '', currency: baseCurrency, exchangeRate: '1',
       partyId: '', projectId: '', sourceAccountId: '', destinationAccountId: '', categoryId: '',
       obligationId: '', description: '', reference: '', reversalOf: '', allowExcess: false,
     },
@@ -152,18 +278,18 @@ function TransactionModal({ open, kind, parties, accounts, projects, categories,
     const nextType = kind ?? 'income';
     setType(nextType);
     reset({
-      type: nextType, date: today(), amount: '', currency: 'PKR', exchangeRate: '1',
+      type: nextType, date: today(), amount: '', currency: baseCurrency, exchangeRate: '1',
       partyId: '', projectId: '', sourceAccountId: '', destinationAccountId: '', categoryId: '',
       obligationId: '', description: '', reference: '', reversalOf: '', allowExcess: false,
     });
-  }, [open, kind, reset]);
+  }, [open, kind, reset, baseCurrency]);
 
   useEffect(() => {
-    if (!open || !adapter || currency === 'PKR') return;
-    void rateForDate(adapter, currency, 'PKR', date).then((rate) => {
+    if (!open || !adapter || currency === baseCurrency) return;
+    void rateForDate(adapter, currency, baseCurrency, date).then((rate) => {
       if (rate) setValue('exchangeRate', rate.toString());
     });
-  }, [open, adapter, currency, date, setValue]);
+  }, [open, adapter, currency, baseCurrency, date, setValue]);
 
   const needsCategory = type === 'income' || type === 'expense' || type === 'refund';
   const needsSource = ['income', 'expense', 'transfer'].includes(type);
@@ -208,7 +334,7 @@ function TransactionModal({ open, kind, parties, accounts, projects, categories,
           <Field label="Date" error={errors.date?.message}><Input type="date" {...register('date')} /></Field>
           <Field label="Amount" error={errors.amount?.message}><Input inputMode="decimal" placeholder="0.00" {...register('amount')} /></Field>
           <Field label="Currency" error={errors.currency?.message}><Input {...register('currency')} /></Field>
-          <Field label="Exchange rate to PKR" error={errors.exchangeRate?.message} hint="1 for PKR; snapshot of the rate on the date."><Input inputMode="decimal" {...register('exchangeRate')} /></Field>
+          <Field label={`Exchange rate to ${baseCurrency}`} error={errors.exchangeRate?.message} hint={`1 for ${baseCurrency}; snapshot of the rate on the date.`}><Input inputMode="decimal" {...register('exchangeRate')} /></Field>
         </div>
 
         {needsSource && (

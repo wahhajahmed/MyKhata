@@ -1,13 +1,14 @@
 # Database schema
 
-Schema version: **1** (`initial_schema`). All tables are created by `src/db/migrations.ts`. Monetary values are stored as `TEXT` decimal strings; integers are used for flags, sizes, versions, and timestamps are ISO-8601 `TEXT` strings.
+Schema version: **2** (`multi_account_settlements_and_fx_metadata`). All tables are created and upgraded by `src/db/migrations.ts`. Monetary values are stored as `TEXT` decimal strings; integers are used for flags, sizes, versions, and timestamps are ISO-8601 `TEXT` strings.
 
 ## Conventions
 
 - Primary keys are UUID strings generated in application code.
 - `deleted_at` provides soft deletion for parties, projects, and accounts. Historical journal rows always retain their references with `ON DELETE RESTRICT`.
 - `created_at` and `updated_at` are application timestamps. Journal entries are immutable after posting.
-- Foreign keys are enabled on native engines. Restore order is child-to-parent to preserve integrity.
+- Foreign keys are enabled on native engines. Restore deletes child rows before parent rows, then inserts parent-to-child in one transaction.
+- Version 2 adds optional settlement/FX metadata columns. Existing rows are preserved; duplicate legacy exchange rates are kept and rate resolution ties are broken deterministically.
 
 ## Core tables
 
@@ -46,7 +47,7 @@ Seeded: PKR (base), USD, EUR, GBP, AED, SAR.
 | `source` | TEXT | Default `manual` |
 | `created_at` | TEXT | Creation timestamp |
 
-Index: `(from_code, to_code, rate_date)`.
+Index: non-unique `(from_code, to_code, rate_date)`. Rate lookups order by `rate_date DESC, created_at DESC, rowid DESC` so legacy duplicates resolve deterministically.
 
 ## Master data
 
@@ -115,6 +116,7 @@ Index: `(kind, is_active)`.
 | `party_id` | TEXT | FK to `parties`, `RESTRICT` |
 | `project_id` | TEXT | Optional FK to `projects`, `SET NULL` |
 | `direction` | TEXT | `receivable` or `payable` |
+| `account_id` | TEXT | Optional account used for the obligation; added in v2 |
 | `reference` | TEXT | Optional user reference |
 | `total_amount` | TEXT | Decimal |
 | `currency` | TEXT | Currency code |
@@ -160,6 +162,8 @@ Indexes: `txn_date`, `(party_id, txn_date)`, `(project_id, txn_date)`, `(type, t
 | `direction` | TEXT | `debit` or `credit` |
 | `amount` | TEXT | Decimal amount |
 | `currency` | TEXT | Currency code |
+| `original_amount` | TEXT | Optional original-currency amount; added in v2 |
+| `original_currency` | TEXT | Optional original currency code; added in v2 |
 | `base_amount` | TEXT | Decimal amount in base currency |
 | `created_at` | TEXT | Creation timestamp |
 
@@ -174,6 +178,8 @@ Indexes: `transaction_id`, `account_code`, `party_id`.
 | `amount` | TEXT | Decimal payment amount |
 | `currency` | TEXT | Currency code |
 | `allow_excess` | INTEGER | 1 when overpayment was explicitly accepted |
+| `reversed_at` | TEXT | Optional reversal timestamp; added in v2 |
+| `reversal_transaction_id` | TEXT | Optional compensating transaction id; added in v2 |
 | `created_at` | TEXT | Creation timestamp |
 
 Index: `obligation_id`.

@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Typecheck, test and web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Application typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Electron main typecheck
+        run: npx tsc --noEmit -p tsconfig.electron.json
+      - name: Financial engine tests
+        run: npm test
+      - name: Web production build
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-dist
+          path: dist/
+          if-no-files-found: warn
+
+  desktop:
+    name: Windows production build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Rebuild native module for Electron
+        run: npm run rebuild:electron
+      - name: Build Windows installer
+        run: npm run desktop:build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer-unsigned
+          path: release/*.exe
+          if-no-files-found: error
+
+  android:
+    name: Android debug verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK components
+        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0" platform-tools
+      - run: npm ci --no-audit --no-fund
+      - name: Build web assets
+        run: npm run build
+      - name: Sync Capacitor
+        run: npx cap sync android
+      - name: Make Gradle wrapper executable
+        run: chmod +x android/gradlew
+      - name: Build unsigned debug APK
+        run: ./android/gradlew -p android assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

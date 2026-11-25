@@ -223,4 +223,25 @@ export const MIGRATIONS: Migration[] = [
         ('schema_version','1', strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
     ],
   },
+  {
+    version: 2,
+    name: 'multi_account_settlements_and_fx_metadata',
+    statements: [
+      // SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS. runMigrations()
+      // guards ADD COLUMN statements with PRAGMA table_info before applying them,
+      // so replaying this migration (or applying it to a partially upgraded DB)
+      // cannot fail with "duplicate column name".
+      `ALTER TABLE obligations ADD COLUMN account_id TEXT`,
+      `ALTER TABLE journal_entries ADD COLUMN original_amount TEXT`,
+      `ALTER TABLE journal_entries ADD COLUMN original_currency TEXT`,
+      `ALTER TABLE settlements ADD COLUMN reversed_at TEXT`,
+      `ALTER TABLE settlements ADD COLUMN reversal_transaction_id TEXT`,
+      // Legacy databases may contain several rates for the same pair/date.
+      // Never delete them: rateForDate() picks one deterministically, and new
+      // entries are validated by the application schema. Keep the v1 index so
+      // every historical rate remains available in reports.
+      `DROP INDEX IF EXISTS idx_exchange_rates_pair_date`,
+      `CREATE INDEX idx_exchange_rates_pair_date ON exchange_rates(from_code, to_code, rate_date)`,
+    ],
+  },
 ];

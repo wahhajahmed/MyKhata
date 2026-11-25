@@ -10,10 +10,10 @@ import type { PartyRow } from '../core/types';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageHeader, Select, Table, Textarea, Toolbar } from '../components/ui';
 import { errorMessage, fmt } from '../lib/format';
 
-const emptyParty: PartyInput = {
+const emptyParty = (baseCurrency = 'PKR'): PartyInput => ({
   name: '', type: 'individual', phone: '', email: '', address: '', notes: '',
-  openingBalance: '0', openingBalanceDirection: 'none', currency: 'PKR',
-};
+  openingBalance: '0', openingBalanceDirection: 'none', currency: baseCurrency,
+});
 
 export default function PartiesPage() {
   const { parties, saveParty, adapter, refresh, notify } = useAppStore();
@@ -99,11 +99,11 @@ function PartyModal({ open, party, onClose, onSave }: {
   onClose: () => void;
   onSave: (input: PartyInput, id?: string) => Promise<string>;
 }) {
-  const { notify } = useAppStore();
+  const { notify, baseCurrency } = useAppStore();
   const [busy, setBusy] = useState(false);
   const form = useForm<PartyInput>({
     resolver: zodResolver(partySchema) as unknown as Resolver<PartyInput>,
-    defaultValues: emptyParty,
+    defaultValues: emptyParty(baseCurrency),
   });
   const { register, handleSubmit, reset, formState: { errors } } = form;
 
@@ -113,8 +113,8 @@ function PartyModal({ open, party, onClose, onSave }: {
       name: party.name, type: party.type, phone: party.phone ?? '', email: party.email ?? '',
       address: party.address ?? '', notes: party.notes ?? '', openingBalance: party.opening_balance,
       openingBalanceDirection: party.opening_balance_direction, currency: party.currency,
-    } : emptyParty);
-  }, [open, party, reset]);
+    } : emptyParty(baseCurrency));
+  }, [open, party, reset, baseCurrency]);
 
   return (
     <Modal open={open} onClose={onClose} title={party ? 'Edit party' : 'Add person or company'}>
@@ -132,7 +132,7 @@ function PartyModal({ open, party, onClose, onSave }: {
             <Select {...register('type')}><option value="individual">Individual</option><option value="company">Company</option></Select>
           </Field>
           <Field label="Currency" error={errors.currency?.message}>
-            <Input placeholder="PKR" {...register('currency')} />
+            <Input placeholder={baseCurrency} {...register('currency')} />
           </Field>
           <Field label="Phone" error={errors.phone?.message}>
             <Input placeholder="03xx-xxxxxxx" {...register('phone')} />

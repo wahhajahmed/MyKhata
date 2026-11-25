@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType } from 'react';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { HashRouter, NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import {
   ArrowLeftRight, BookCopy, Cloud, DatabaseBackup, FileText, HandCoins, Landmark,
@@ -7,6 +7,7 @@ import {
 import { useAppStore } from './store/useAppStore';
 import { t, type StringKey } from './i18n/strings';
 import { Button, Spinner, ToastHost } from './components/ui';
+import LockScreen from './components/LockScreen';
 import Dashboard from './pages/Dashboard';
 import PartiesPage from './pages/Parties';
 import ProjectsPage from './pages/Projects';
@@ -43,14 +44,36 @@ function BriefcaseIcon({ className }: { className?: string }) {
 }
 
 function Shell() {
-  const { ready, initializing, error, theme, language, syncStatus, lastSync, init, setTheme, setLanguage } = useAppStore();
+  const {
+    ready, initializing, error, theme, language, syncStatus, lastSync, init, setTheme, setLanguage,
+    securityState, locked, lock, lockTimeoutMinutes,
+  } = useAppStore();
   const [menuOpen, setMenuOpen] = useState(false);
+  const lastActivity = useRef(Date.now());
 
   useEffect(() => { void init(); }, [init]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
+
+  // Auto-lock after the configured idle period. The wallet never stays open
+  // unattended, and the database is closed by the platform security layer.
+  useEffect(() => {
+    if (!securityState?.configured || locked) return;
+    const reset = () => { lastActivity.current = Date.now(); };
+    const events: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'focus'];
+    events.forEach((event) => window.addEventListener(event, reset, { passive: true }));
+    document.addEventListener('visibilitychange', reset);
+    const timer = window.setInterval(() => {
+      if (Date.now() - lastActivity.current >= lockTimeoutMinutes * 60_000) void lock();
+    }, 15_000);
+    return () => {
+      events.forEach((event) => window.removeEventListener(event, reset));
+      document.removeEventListener('visibilitychange', reset);
+      window.clearInterval(timer);
+    };
+  }, [securityState?.configured, locked, lockTimeoutMinutes, lock]);
 
   useEffect(() => {
     document.documentElement.dir = language === 'ur' ? 'rtl' : 'ltr';
@@ -75,6 +98,8 @@ function Shell() {
       </div>
     );
   }
+
+  if (locked) return <LockScreen />;
 
   const navItems = NAV.map((item) => (
     <NavLink
@@ -141,6 +166,16 @@ function Shell() {
             >
               {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
+            {securityState?.configured && (
+              <button
+                onClick={() => void lock()}
+                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-navy-800"
+                aria-label="Lock app now"
+                title="Lock now"
+              >
+                <ShieldCheck className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </header>
 

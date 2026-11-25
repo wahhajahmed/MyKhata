@@ -12,7 +12,7 @@ import { Badge, Button, Card, EmptyState, PageHeader, StatCard, Table } from '..
 import { dateLabel, errorMessage, fmt, shortId, transactionLabel } from '../lib/format';
 
 export default function Dashboard() {
-  const { adapter, parties, projects, transactions, obligations, preset, from, to, setRange, language, notify } = useAppStore();
+  const { adapter, parties, projects, transactions, obligations, preset, from, to, setRange, language, notify, baseCurrency } = useAppStore();
   const [data, setData] = useState<DashboardData | null>(null);
   const [busy, setBusy] = useState(true);
 
@@ -43,10 +43,10 @@ export default function Dashboard() {
           <StatCard label={t(language, 'receivablesShort')} value={fmt(data.totalReceivables)} icon={<ArrowUpRight className="h-4 w-4" />} tone="positive" />
           <StatCard label={t(language, 'payablesShort')} value={fmt(data.totalPayables)} icon={<ArrowDownRight className="h-4 w-4" />} tone="negative" />
           <StatCard label={t(language, 'netPosition')} value={fmt(data.netPosition)} icon={<TrendingUp className="h-4 w-4" />} tone="info" />
-          <StatCard label={t(language, 'cash')} value={fmt(data.cashBalance, 'PKR', false)} icon={<Banknote className="h-4 w-4" />} />
-          <StatCard label={t(language, 'bank')} value={fmt(data.bankBalance, 'PKR', false)} icon={<Landmark className="h-4 w-4" />} />
-          <StatCard label={t(language, 'wallet')} value={fmt(data.walletBalance, 'PKR', false)} icon={<Wallet className="h-4 w-4" />} />
-          <StatCard label={t(language, 'monthlyIncome')} value={fmt(data.incomeThisMonth, 'PKR', false)} icon={<Plus className="h-4 w-4" />} tone="positive" hint={`Expenses ${fmt(data.expensesThisMonth, 'PKR', false)}`} />
+          <StatCard label={t(language, 'cash')} value={fmt(data.cashBalance, baseCurrency, false)} icon={<Banknote className="h-4 w-4" />} />
+          <StatCard label={t(language, 'bank')} value={fmt(data.bankBalance, baseCurrency, false)} icon={<Landmark className="h-4 w-4" />} />
+          <StatCard label={t(language, 'wallet')} value={fmt(data.walletBalance, baseCurrency, false)} icon={<Wallet className="h-4 w-4" />} />
+          <StatCard label={t(language, 'monthlyIncome')} value={fmt(data.incomeThisMonth, baseCurrency, false)} icon={<Plus className="h-4 w-4" />} tone="positive" hint={`Expenses ${fmt(data.expensesThisMonth, baseCurrency, false)}`} />
         </div>
       )}
 
@@ -55,7 +55,7 @@ export default function Dashboard() {
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Income vs expenses</h2>
-              <p className="text-xs text-slate-400">Last six months, in base currency (PKR)</p>
+              <p className="text-xs text-slate-400">Last six months, in base currency ({baseCurrency})</p>
             </div>
             <Badge tone={data?.journalIsBalanced ? 'positive' : 'negative'}>
               <ShieldCheck className="me-1 inline h-3 w-3" />{data?.journalIsBalanced ? 'Ledger balanced' : 'Check ledger'}
@@ -67,7 +67,7 @@ export default function Dashboard() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748B' }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 11, fill: '#64748B' }} axisLine={false} tickLine={false} />
-                <Tooltip formatter={(value) => fmt(String(value), 'PKR', false)} contentStyle={{ borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 12 }} />
+                <Tooltip formatter={(value) => fmt(String(value), baseCurrency, false)} contentStyle={{ borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 12 }} />
                 <Bar dataKey="income" name="Income" fill="#10B981" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="expense" name="Expenses" fill="#F97316" radius={[4, 4, 0, 0]} />
               </BarChart>

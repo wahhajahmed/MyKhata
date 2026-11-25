@@ -7,7 +7,18 @@ export function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function fmt(amount: string | Money, currency = 'PKR', withCode = true): string {
+/** Updated from the saved setting so summaries use the configured base currency. */
+let defaultCurrency = 'PKR';
+
+export function setDefaultCurrency(currency: string): void {
+  defaultCurrency = currency.trim() || 'PKR';
+}
+
+export function getDefaultCurrency(): string {
+  return defaultCurrency;
+}
+
+export function fmt(amount: string | Money, currency = defaultCurrency, withCode = true): string {
   return formatMoney(amount, currency, withCode);
 }
 

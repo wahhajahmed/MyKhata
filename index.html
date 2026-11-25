@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0b1528" />
     <meta name="description" content="MyKhata — offline-first personal finance and digital khata management" />
+    <!-- csp:prod -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob:; font-src 'self' file: data:; connect-src 'self' file: https:; worker-src 'self' file: blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'" />
+    <!-- /csp:prod -->
+    <!-- csp:dev -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' http://localhost:* ws://localhost:*; script-src 'self' http://localhost:*; style-src 'self' 'unsafe-inline' http://localhost:*; img-src 'self' data: blob: http://localhost:*; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* https:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'" />
+    <!-- /csp:dev -->
     <title>MyKhata</title>
   </head>
   <body>

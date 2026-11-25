@@ -36,10 +36,56 @@ All notable changes to MyKhata are documented here. The format follows Keep a Ch
 - Cloud sync remains disabled until Supabase credentials and explicit user approval are provided.
 - Database-at-rest encryption, app lock, release signing, and code signing are not included in this version; see SECURITY.md.
 
-## [Unreleased]
+## [0.2.0] — 2026-11-26
 
-### Planned
+### Added
 
-- Independent security review and database-at-rest encryption evaluation.
-- Release signing configuration for Android and code signing for Windows.
-- Attachment UI and richer audit-log browsing.
+- Opt-in app lock with PIN/password policy, idle auto-lock, manual lock, change PIN and disable flows.
+- Encrypted local SQLite on Windows (SQLCipher-compatible cipher via `better-sqlite3-multiple-ciphers`) and Android (Capacitor SQLite SQLCipher), migrated in place from plaintext without deleting records.
+- Optional Android biometric unlock using OS-protected secret storage.
+- Receipt/invoice attachments stored as validated BLOBs inside the encrypted database, with per-transaction picker, open/download and delete UI.
+- Strict encrypted-backup envelope validation with distinct wrong-password/corrupt/unsupported/invalid reasons, dump validation before restore, and FK-safe restore ordering.
+- GitHub Actions CI for typechecks, tests, web build, Windows installer and Android debug verification; manual draft-gate release workflow with optional signing secrets and release-tag-derived Android versioning.
+- Regression tests for settlement reversals, idempotency conflicts, statement sign/date handling, multi-currency postings, backup failure modes, migration versioning, PIN policy and the lock screen.
+
+### Changed
+
+- Electron main process now owns SQLite encryption keys, gates all database IPC while locked, validates IPC senders, removes arbitrary filesystem IPC, ships a strict production CSP, and disables production source maps.
+- Android backup of app data is disabled and FileProvider paths are restricted to specific subdirectories.
+- Sync consent text now enumerates the fields uploaded; device identity is stable and conflicts no longer advance the sync watermark.
+- Reports and dashboards aggregate over the full selected range and label mixed-currency figures explicitly.
+
+### Fixed
+
+- Settlement reversal now produces a compensating settlement, restores obligation status and keeps reports consistent.
+- Duplicate settlement submissions are prevented by a deterministic idempotency key; reusing a transaction key with a different payload is a conflict.
+- Party statement sign convention, all-time account statement double counting, reverse chronological running balances, and dashboard currency/income aggregates.
+- Multi-currency postings, settlements and journal rows no longer hardcode PKR/rate 1; refunds and reversals are capped to the original amount and dated from the original transaction.
+- Invalid calendar dates, non-positive exchange rates, incomplete dumps, identifier injection in restore, and re-application of old migrations.
+- Legacy exchange-rate rows are preserved during migration; duplicate rates are resolved deterministically instead of silently deleted.
+- Base-currency labels, summaries, and form defaults now follow the saved setting instead of hardcoding PKR.
+
+### Verification
+
+Commands run locally on Windows before release preparation:
+
+- `npx tsc --noEmit -p tsconfig.json` — passed.
+- `npx tsc --noEmit -p tsconfig.electron.json` — passed.
+- `npm test` — 14 test files, 60 tests passed.
+- `npm run desktop:build` — built `release/MyKhata Setup 0.2.0.exe`; `Get-AuthenticodeSignature` reports `NotSigned` because no certificate was supplied.
+- `npx cap sync android` — completed with seven Capacitor plugins.
+- `./android/gradlew -p android assembleDebug --no-daemon` — `BUILD SUCCESSFUL`, exit 0.
+- `./android/gradlew -p android assembleRelease bundleRelease --no-daemon -PmykhataVersionCode=200 -PmykhataVersionName=0.2.0` — `BUILD SUCCESSFUL`, exit 0. Outputs are unsigned.
+- `dist/` contains zero `.map` files, confirming production source maps are disabled.
+- An isolated SQLCipher check rekeyed a plaintext database in place, preserved all rows with `integrity_check = ok`, and rejected a wrong key with `file is not a database`.
+- Encrypted-backup tests cover wrong passphrase, corrupt/truncated ciphertext, tampered header, unsupported version, invalid dump, oversized input, and attachment BLOB round-trip.
+- Restore tests cover FK-safe ordering with parties, transactions, journal entries, and attachments.
+- Migration tests cover version gating, one-time v2 columns, preservation of legacy duplicate rates, deterministic rate selection, and partially upgraded databases.
+- No Supabase URL/key was present; sync remained inert during verification.
+
+### Notes
+
+- Cloud sync remains opt-in and disabled by default.
+- Signed artifacts require signing credentials; the release workflow produces a draft release with unsigned builds otherwise.
+- Android SQLCipher/biometric on-device testing, real-device offline testing, and independent security review remain manual follow-ups; automated builds and typechecks are not device verification.
+- The Windows and Android artifacts are unsigned and were not published.

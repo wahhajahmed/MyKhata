@@ -10,7 +10,7 @@ import { Badge, Button, Card, PageHeader } from '../components/ui';
 import { dateLabel, errorMessage, fmt } from '../lib/format';
 
 export default function ReportsPage() {
-  const { adapter, preset, from, to, notify } = useAppStore();
+  const { adapter, preset, from, to, notify, baseCurrency } = useAppStore();
   const range: DateRange = { from: from || undefined, to: to || undefined };
   const [summary, setSummary] = useState<SummaryStatement | null>(null);
   const [categories, setCategories] = useState<Array<{ name: string; amount: { toString(): string } }>>([]);
@@ -58,9 +58,9 @@ export default function ReportsPage() {
           </div>
           {summary && (
             <div className="grid gap-3 sm:grid-cols-4">
-              <Metric label="Income" value={fmt(summary.income, 'PKR')} tone="text-emerald-600" />
-              <Metric label="Expenses" value={fmt(summary.expense, 'PKR')} tone="text-red-600" />
-              <Metric label="Net movement" value={fmt(summary.closing, 'PKR')} tone="text-slate-900 dark:text-white" />
+              <Metric label="Income" value={fmt(summary.income, baseCurrency)} tone="text-emerald-600" />
+              <Metric label="Expenses" value={fmt(summary.expense, baseCurrency)} tone="text-red-600" />
+              <Metric label="Net movement" value={fmt(summary.closing, baseCurrency)} tone="text-slate-900 dark:text-white" />
               <Metric label="Transactions" value={String(summary.lines.length)} tone="text-slate-900 dark:text-white" />
             </div>
           )}
@@ -69,12 +69,12 @@ export default function ReportsPage() {
 
         <Card className="p-4">
           <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Currency breakdown</h2>
-          <p className="mt-1 text-xs text-slate-400">Original amounts vs base (PKR) — never mixed without conversion.</p>
+          <p className="mt-1 text-xs text-slate-400">Original amounts vs base ({baseCurrency}) — never mixed without conversion.</p>
           <div className="mt-3 space-y-2">
             {currencies.map((c) => (
               <div key={c.code} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-navy-900">
                 <span className="font-medium">{c.code}</span>
-                <span className="num text-xs text-slate-500">{fmt(c.amount.toString(), c.code, false)} → <span className="font-semibold text-slate-800 dark:text-slate-100">{fmt(c.base.toString(), 'PKR')}</span></span>
+                <span className="num text-xs text-slate-500">{fmt(c.amount.toString(), c.code, false)} → <span className="font-semibold text-slate-800 dark:text-slate-100">{fmt(c.base.toString(), baseCurrency)}</span></span>
               </div>
             ))}
             {!currencies.length && <p className="text-xs text-slate-400">No transactions in this range.</p>}

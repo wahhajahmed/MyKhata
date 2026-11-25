@@ -30,6 +30,11 @@ data/*.db
 backups/
 *.MYKHATA.bak
 *.mykhata.bak
+*.mykhata
+mykhata-sql-dump-*.json
+*.dump.json
+auth.json
+*.sqlite*
 
 # Logs and caches
 logs/
@@ -47,6 +52,8 @@ test-results/
 # Environment and secrets
 .env
 .env.local
+.env.*
+!.env.example
 .env.*.local
 *.pem
 *.key

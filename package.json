@@ -1,6 +1,6 @@
 {
   "name": "mykhata",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Professional Offline-First Personal Finance and Digital Khata Management Application",
   "main": "dist-electron/main.js",
@@ -13,21 +13,25 @@
     "test:watch": "vitest",
     "electron:build-main": "tsc -p tsconfig.electron.json",
     "desktop:dev": "npm run electron:build-main && electron .",
-    "desktop:build": "npm run build && npm run electron:build-main && electron-builder --win --x64",
-    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "desktop:build": "npm run rebuild:electron && npm run build && npm run electron:build-main && electron-builder --win --x64",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3-multiple-ciphers",
     "cap:add": "cap add android",
     "cap:sync": "cap sync android",
     "android:build": "npm run build && cap sync android && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
+    "@aparajita/capacitor-biometric-auth": "8.0.0",
     "@capacitor-community/sqlite": "6.0.1",
+    "@capacitor/app": "6.0.1",
     "@capacitor/core": "6.2.1",
     "@capacitor/filesystem": "6.0.4",
     "@capacitor/preferences": "6.0.3",
     "@capacitor/share": "6.0.3",
     "@hookform/resolvers": "3.9.1",
     "@supabase/supabase-js": "2.47.10",
+    "better-sqlite3-multiple-ciphers": "11.8.1",
     "big.js": "6.2.2",
+    "capacitor-secure-storage-plugin": "0.10.0",
     "lucide-react": "0.468.0",
     "pdfmake": "0.2.16",
     "react": "18.3.1",
@@ -74,7 +78,7 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "node_modules/better-sqlite3/**/*",
+      "node_modules/better-sqlite3-multiple-ciphers/**/*",
       "node_modules/sql.js/**/*"
     ],
     "directories": {
@@ -84,7 +88,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },

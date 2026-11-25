@@ -61,6 +61,8 @@ export interface ObligationRow {
   id: string;
   party_id: string;
   project_id: string | null;
+  /** Optional v2 column; older databases do not have it. */
+  account_id?: string | null;
   direction: 'receivable' | 'payable';
   reference: string | null;
   total_amount: string;
@@ -106,6 +108,9 @@ export interface JournalRow {
   currency: string;
   base_amount: string;
   created_at: string;
+  /** Optional v2 columns; when absent, `amount`/`currency` carry the original values. */
+  original_amount?: string | null;
+  original_currency?: string | null;
 }
 
 export interface SettlementRow {
@@ -116,6 +121,9 @@ export interface SettlementRow {
   currency: string;
   allow_excess: number;
   created_at: string;
+  /** Optional v2 reversal markers; compensating rows are stored with a negative amount. */
+  reversed_at?: string | null;
+  reversal_transaction_id?: string | null;
 }
 
 export interface Balances {

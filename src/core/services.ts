@@ -1,7 +1,7 @@
 import { nowIso, uuid } from './ids';
-import { Money } from './money';
-import { accountSchema, categorySchema, exchangeRateSchema, partySchema, projectSchema, obligationSchema, settlementSchema, transactionSchema, type AccountInput, type CategoryInput, type ExchangeRateInput, type ObligationInput, type PartyInput, type ProjectInput, type SettlementInput, type TransactionInput } from './schemas';
-import { accountCode, assertBalanced, buildPostings, payableCode, receivableCode, type Posting } from './ledger';
+import { convert, Money, type MoneyInput } from './money';
+import { accountSchema, categorySchema, dateString, exchangeRateSchema, partySchema, projectSchema, obligationSchema, settlementSchema, transactionSchema, type AccountInput, type CategoryInput, type ExchangeRateInput, type ObligationInput, type PartyInput, type ProjectInput, type SettlementInput, type TransactionInput } from './schemas';
+import { accountCode, assertBalanced, buildPostings, obligationOutstanding, payableCode, receivableCode, settlementStatus, type Posting } from './ledger';
 import type { AccountRow, CategoryRow, JournalRow, ObligationRow, PartyRow, ProjectRow, SettlementRow, TransactionRow } from './types';
 import { runMigrations, type DbAdapter, type SqlStatement } from '../db/adapter';
 
@@ -25,33 +25,127 @@ function enqueue(entityType: string, entityId: string, operation: string, payloa
   });
 }
 
-function systemTransaction(statements: SqlStatement[], kind: string, date: string, postings: Posting[], description: string): string {
+/**
+ * Serializes read-then-write validation per adapter. The renderer can fire two
+ * clicks before the first promise resolves; without this chain both would pass
+ * the idempotency/outstanding checks and race inside a single SQLite adapter.
+ */
+const adapterQueues = new WeakMap<DbAdapter, Promise<unknown>>();
+
+function serialize<T>(adapter: DbAdapter, work: () => Promise<T>): Promise<T> {
+  const previous = adapterQueues.get(adapter) ?? Promise.resolve();
+  const next = previous.then(work, work);
+  adapterQueues.set(adapter, next.then(() => undefined, () => undefined));
+  return next;
+}
+
+const columnCache = new WeakMap<DbAdapter, Map<string, Promise<Set<string>>>>();
+
+async function hasColumn(adapter: DbAdapter, table: string, column: string): Promise<boolean> {
+  let tables = columnCache.get(adapter);
+  if (!tables) {
+    tables = new Map();
+    columnCache.set(adapter, tables);
+  }
+  let columns = tables.get(table);
+  if (!columns) {
+    columns = adapter.all<{ name: string }>(`PRAGMA table_info(${table})`).then((rows) => new Set(rows.map((r) => r.name)));
+    tables.set(table, columns);
+  }
+  return (await columns).has(column);
+}
+
+async function baseCurrency(adapter: DbAdapter): Promise<string> {
+  return (await getSetting(adapter, 'base_currency', 'PKR')) || 'PKR';
+}
+
+/** Direct rate first, then the inverse of the opposite direction. */
+export async function resolveRate(adapter: DbAdapter, from: string, to: string, date: string): Promise<Money> {
+  if (from === to) return Money.of(1);
+  const direct = await rateForDate(adapter, from, to, date);
+  if (direct) return direct;
+  const inverse = await rateForDate(adapter, to, from, date);
+  if (inverse && !inverse.isZero()) return Money.of(1).div(inverse);
+  throw new Error(`No exchange rate from ${from} to ${to} on or before ${date}. Save a rate for ${from} → ${to} (or its inverse) first.`);
+}
+
+async function convertToBase(adapter: DbAdapter, amount: MoneyInput, currency: string, date: string): Promise<Money> {
+  return convert(amount, await resolveRate(adapter, currency, await baseCurrency(adapter), date));
+}
+
+interface SystemTransactionOptions {
+  currency?: string;
+  exchangeRate?: MoneyInput;
+  amount?: MoneyInput;
+  baseAmount?: Money;
+}
+
+async function systemTransaction(
+  adapter: DbAdapter,
+  statements: SqlStatement[],
+  kind: string,
+  date: string,
+  postings: Posting[],
+  description: string,
+  options: SystemTransactionOptions = {},
+): Promise<string> {
   const id = uuid();
   const now = nowIso();
-  const base = postings[0]?.amount.toString() ?? '0';
+  const currency = options.currency ?? await baseCurrency(adapter);
+  const exchangeRate = Money.of(options.exchangeRate ?? 1);
+  const base = options.baseAmount ?? (postings[0]?.amount ?? Money.zero());
+  const amount = Money.of(options.amount ?? base);
   statements.push({
     sql: `INSERT INTO transactions(id, type, txn_date, amount, currency, exchange_rate, base_amount, rate_date,
           description, idempotency_key, is_system, created_at, updated_at)
-          VALUES (?,?,?,?,?,'1',?,?,?,?,1,?,?)`,
-    params: [id, kind, date, base, 'PKR', base, date, description, `system:${kind}:${id}`, now, now],
+          VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?)`,
+    params: [id, kind, date, amount.toString(), currency, exchangeRate.toString(), base.toString(), date,
+      description, `system:${kind}:${id}`, now, now],
   });
-  insertJournal(statements, id, postings, date);
+  await insertJournal(adapter, statements, id, postings, date, { currency, exchangeRate, amount });
   return id;
 }
 
-function insertJournal(statements: SqlStatement[], transactionId: string, postings: Posting[], date: string): void {
+async function insertJournal(
+  adapter: DbAdapter,
+  statements: SqlStatement[],
+  transactionId: string,
+  postings: Posting[],
+  date: string,
+  meta: { currency?: string; exchangeRate?: MoneyInput; amount?: MoneyInput } = {},
+): Promise<void> {
   assertBalanced(postings);
+  const currency = meta.currency ?? await baseCurrency(adapter);
+  const hasOriginalColumns = await hasColumn(adapter, 'journal_entries', 'original_amount');
   for (const posting of postings) {
-    statements.push({
-      sql: `INSERT INTO journal_entries(id, transaction_id, account_code, party_id, direction, amount, currency, base_amount, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?)`,
-      params: [uuid(), transactionId, posting.accountCode, posting.partyId, posting.direction, posting.amount.toString(), 'PKR', posting.amount.toString(), date],
-    });
+    const base = posting.amount.toString();
+    const original = posting.originalAmount?.toString() ?? meta.amount?.toString() ?? base;
+    const originalCurrency = posting.currency ?? currency;
+    if (hasOriginalColumns) {
+      statements.push({
+        sql: `INSERT INTO journal_entries(id, transaction_id, account_code, party_id, direction, amount, currency,
+              base_amount, original_amount, original_currency, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        params: [uuid(), transactionId, posting.accountCode, posting.partyId, posting.direction, base, currency,
+          base, original, originalCurrency, date],
+      });
+    } else {
+      // Legacy schema: amount/currency were always base before v2. Keep the
+      // original values there as a compatible fallback; base_amount is unchanged.
+      statements.push({
+        sql: `INSERT INTO journal_entries(id, transaction_id, account_code, party_id, direction, amount, currency, base_amount, created_at)
+              VALUES (?,?,?,?,?,?,?,?,?)`,
+        params: [uuid(), transactionId, posting.accountCode, posting.partyId, posting.direction, original, originalCurrency, base, date],
+      });
+    }
   }
 }
 
-export async function initializeDatabase(adapter: DbAdapter): Promise<void> {
-  await runMigrations(adapter);
+export function initializeDatabase(adapter: DbAdapter): Promise<void> {
+  return serialize(adapter, async () => {
+    await runMigrations(adapter);
+    // The v2 columns may have just been added; force schema re-detection.
+    columnCache.delete(adapter);
+  });
 }
 
 /* ------------------------------------------------------------------ parties */
@@ -65,7 +159,11 @@ export async function getParty(adapter: DbAdapter, id: string): Promise<PartyRow
   return adapter.get<PartyRow>('SELECT * FROM parties WHERE id = ?', [id]);
 }
 
-export async function saveParty(adapter: DbAdapter, input: PartyInput, id?: string): Promise<string> {
+export function saveParty(adapter: DbAdapter, input: PartyInput, id?: string): Promise<string> {
+  return serialize(adapter, () => savePartyUnlocked(adapter, input, id));
+}
+
+async function savePartyUnlocked(adapter: DbAdapter, input: PartyInput, id?: string): Promise<string> {
   const data = partySchema.parse(input);
   const existing = id ? await getParty(adapter, id) : undefined;
   const partyId = id ?? uuid();
@@ -89,10 +187,15 @@ export async function saveParty(adapter: DbAdapter, input: PartyInput, id?: stri
     const opening = Money.of(data.openingBalance);
     if (!opening.isZero() && data.openingBalanceDirection !== 'none') {
       const code = data.openingBalanceDirection === 'receivable' ? receivableCode(partyId) : payableCode(partyId);
+      const date = now.slice(0, 10);
+      const base = await convertToBase(adapter, opening, data.currency, date);
+      const rate = opening.isZero() ? Money.of(1) : base.div(opening);
       const postings: Posting[] = data.openingBalanceDirection === 'receivable'
-        ? [{ accountCode: code, partyId, direction: 'debit', amount: opening }, { accountCode: EQUITY_OPENING, partyId: null, direction: 'credit', amount: opening }]
-        : [{ accountCode: EQUITY_OPENING, partyId: null, direction: 'debit', amount: opening }, { accountCode: code, partyId, direction: 'credit', amount: opening }];
-      systemTransaction(statements, 'adjustment', now.slice(0, 10), postings, `Opening balance — ${data.name}`);
+        ? [{ accountCode: code, partyId, direction: 'debit', amount: base }, { accountCode: EQUITY_OPENING, partyId: null, direction: 'credit', amount: base }]
+        : [{ accountCode: EQUITY_OPENING, partyId: null, direction: 'debit', amount: base }, { accountCode: code, partyId, direction: 'credit', amount: base }];
+      await systemTransaction(adapter, statements, 'adjustment', date, postings, `Opening balance — ${data.name}`, {
+        currency: data.currency, exchangeRate: rate, amount: opening, baseAmount: base,
+      });
     }
   }
   audit('party', partyId, existing ? 'update' : 'create', data, statements);
@@ -155,7 +258,11 @@ export async function listAccounts(adapter: DbAdapter, includeArchived = false):
   );
 }
 
-export async function saveAccount(adapter: DbAdapter, input: AccountInput, id?: string): Promise<string> {
+export function saveAccount(adapter: DbAdapter, input: AccountInput, id?: string): Promise<string> {
+  return serialize(adapter, () => saveAccountUnlocked(adapter, input, id));
+}
+
+async function saveAccountUnlocked(adapter: DbAdapter, input: AccountInput, id?: string): Promise<string> {
   const data = accountSchema.parse(input);
   const accountId = id ?? uuid();
   const now = nowIso();
@@ -174,10 +281,15 @@ export async function saveAccount(adapter: DbAdapter, input: AccountInput, id?: 
     const opening = Money.of(data.openingBalance);
     if (!opening.isZero()) {
       const asset = accountCode(accountId);
+      const date = now.slice(0, 10);
+      const baseAmount = await convertToBase(adapter, opening.abs(), data.currency, date);
+      const rate = baseAmount.div(opening.abs());
       const postings: Posting[] = opening.isPositive()
-        ? [{ accountCode: asset, partyId: null, direction: 'debit', amount: opening }, { accountCode: EQUITY_OPENING, partyId: null, direction: 'credit', amount: opening }]
-        : [{ accountCode: EQUITY_OPENING, partyId: null, direction: 'debit', amount: opening.abs() }, { accountCode: asset, partyId: null, direction: 'credit', amount: opening.abs() }];
-      systemTransaction(statements, 'adjustment', now.slice(0, 10), postings, `Opening balance — ${data.name}`);
+        ? [{ accountCode: asset, partyId: null, direction: 'debit', amount: baseAmount }, { accountCode: EQUITY_OPENING, partyId: null, direction: 'credit', amount: baseAmount }]
+        : [{ accountCode: EQUITY_OPENING, partyId: null, direction: 'debit', amount: baseAmount }, { accountCode: asset, partyId: null, direction: 'credit', amount: baseAmount }];
+      await systemTransaction(adapter, statements, 'adjustment', date, postings, `Opening balance — ${data.name}`, {
+        currency: data.currency, exchangeRate: rate, amount: opening.abs(), baseAmount,
+      });
     }
   }
   audit('account', accountId, id ? 'update' : 'create', data, statements);
@@ -251,7 +363,7 @@ export async function listExchangeRates(adapter: DbAdapter): Promise<Array<{ id:
 export async function rateForDate(adapter: DbAdapter, from: string, to: string, date: string): Promise<Money | undefined> {
   if (from === to) return Money.of(1);
   const row = await adapter.get<{ rate: string }>(
-    `SELECT rate FROM exchange_rates WHERE from_code=? AND to_code=? AND rate_date<=? ORDER BY rate_date DESC LIMIT 1`,
+    `SELECT rate FROM exchange_rates WHERE from_code=? AND to_code=? AND rate_date<=? ORDER BY rate_date DESC, created_at DESC, rowid DESC LIMIT 1`,
     [from, to, date],
   );
   return row ? Money.of(row.rate) : undefined;
@@ -271,22 +383,39 @@ export async function listObligations(adapter: DbAdapter, filters: { partyId?: s
   );
 }
 
-export async function createObligation(adapter: DbAdapter, input: ObligationInput): Promise<string> {
+export function createObligation(adapter: DbAdapter, input: ObligationInput): Promise<string> {
+  return serialize(adapter, () => createObligationUnlocked(adapter, input));
+}
+
+async function createObligationUnlocked(adapter: DbAdapter, input: ObligationInput): Promise<string> {
   const data = obligationSchema.parse(input);
+  const account = await adapter.get<AccountRow>('SELECT * FROM accounts WHERE id=?', [data.accountId]);
+  if (!account) throw new Error('Account not found');
   const id = uuid();
   const now = nowIso();
-  const statements: SqlStatement[] = [{
-    sql: `INSERT INTO obligations(id,party_id,project_id,direction,reference,total_amount,currency,due_date,notes,status,created_at,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,'open',?,?)`,
-    params: [id, data.partyId, data.projectId || null, data.direction, data.reference || null, data.totalAmount, data.currency, data.dueDate || null, data.notes || null, now, now],
-  }];
+  const date = now.slice(0, 10);
+  const reportingCurrency = await baseCurrency(adapter);
+  const rate = await resolveRate(adapter, data.currency, reportingCurrency, date);
+  // Both the account and the obligation must be expressible in the reporting currency.
+  await resolveRate(adapter, account.currency, reportingCurrency, date);
   const amount = Money.of(data.totalAmount);
+  const baseAmount = convert(amount, rate);
+  const hasAccountColumn = await hasColumn(adapter, 'obligations', 'account_id');
+  const statements: SqlStatement[] = [{
+    sql: `INSERT INTO obligations(id,party_id,project_id,${hasAccountColumn ? 'account_id,' : ''}direction,reference,total_amount,
+          currency,due_date,notes,status,created_at,updated_at) VALUES (?,?,?,${hasAccountColumn ? '?,' : ''}?,?,?,?,?,?,'open',?,?)`,
+    params: [id, data.partyId, data.projectId || null, ...(hasAccountColumn ? [data.accountId] : []),
+      data.direction, data.reference || null, data.totalAmount, data.currency, data.dueDate || null, data.notes || null, now, now],
+  }];
   const partyCode = data.direction === 'receivable' ? receivableCode(data.partyId) : payableCode(data.partyId);
   const cashCode = accountCode(data.accountId);
   const postings: Posting[] = data.direction === 'receivable'
-    ? [{ accountCode: partyCode, partyId: data.partyId, direction: 'debit', amount }, { accountCode: cashCode, partyId: null, direction: 'credit', amount }]
-    : [{ accountCode: cashCode, partyId: null, direction: 'debit', amount }, { accountCode: partyCode, partyId: data.partyId, direction: 'credit', amount }];
-  systemTransaction(statements, data.direction === 'receivable' ? 'receivable_creation' : 'payable_creation', now.slice(0, 10), postings, `Obligation ${data.reference ?? id.slice(0, 8)}`);
+    ? [{ accountCode: partyCode, partyId: data.partyId, direction: 'debit', amount: baseAmount, originalAmount: amount, currency: data.currency },
+      { accountCode: cashCode, partyId: null, direction: 'credit', amount: baseAmount, originalAmount: amount, currency: data.currency }]
+    : [{ accountCode: cashCode, partyId: null, direction: 'debit', amount: baseAmount, originalAmount: amount, currency: data.currency },
+      { accountCode: partyCode, partyId: data.partyId, direction: 'credit', amount: baseAmount, originalAmount: amount, currency: data.currency }];
+  await systemTransaction(adapter, statements, data.direction === 'receivable' ? 'receivable_creation' : 'payable_creation', date, postings,
+    `Obligation ${data.reference ?? id.slice(0, 8)}`, { currency: data.currency, exchangeRate: rate, amount, baseAmount });
   audit('obligation', id, 'create', data, statements);
   enqueue('obligation', id, 'upsert', { ...data, id }, statements);
   await adapter.batch(statements);
@@ -295,7 +424,7 @@ export async function createObligation(adapter: DbAdapter, input: ObligationInpu
 
 export async function listSettlements(adapter: DbAdapter, obligationId?: string): Promise<SettlementRow[]> {
   return adapter.all<SettlementRow>(
-    `SELECT * FROM settlements ${obligationId ? 'WHERE obligation_id=?' : ''} ORDER BY created_at`,
+    `SELECT * FROM settlements ${obligationId ? 'WHERE obligation_id=?' : ''} ORDER BY created_at, id`,
     obligationId ? [obligationId] : [],
   );
 }
@@ -307,11 +436,102 @@ export interface CreateTransactionResult {
   duplicate: boolean;
 }
 
-export async function createTransaction(adapter: DbAdapter, input: TransactionInput): Promise<CreateTransactionResult> {
+const SETTLEMENT_TYPES = new Set(['receivable_settlement', 'payable_settlement']);
+
+function isSettlementType(type: string): boolean {
+  return SETTLEMENT_TYPES.has(type);
+}
+
+function sameMoney(left: string, right: string): boolean {
+  return Money.of(left).equals(Money.of(right));
+}
+
+/** An idempotency key may only be reused for a byte-for-byte equivalent posting. */
+function matchesIdempotency(existing: TransactionRow, data: TransactionInput, base: Money): boolean {
+  const same = (row: string | null | undefined, input: string | undefined) => (row ?? '') === (input ?? '');
+  try {
+    return existing.type === data.type
+      && existing.txn_date === data.date
+      && sameMoney(existing.amount, data.amount)
+      && existing.currency === data.currency
+      && sameMoney(existing.exchange_rate, data.exchangeRate)
+      && sameMoney(existing.base_amount, base.toString())
+      && existing.rate_date === data.date
+      && same(existing.party_id, data.partyId)
+      && same(existing.project_id, data.projectId)
+      && same(existing.source_account_id, data.sourceAccountId)
+      && same(existing.destination_account_id, data.destinationAccountId)
+      && same(existing.category_id, data.categoryId)
+      && same(existing.obligation_id, data.obligationId)
+      && same(existing.description, data.description)
+      && same(existing.reference, data.reference)
+      && same(existing.reversal_of, data.reversalOf);
+  } catch {
+    return false;
+  }
+}
+
+/** The audit payload is the logical request; it also covers flags with no column. */
+function matchesAuditPayload(raw: string | undefined, data: TransactionInput): boolean {
+  if (!raw) return true;
+  let prior: Record<string, unknown>;
+  try {
+    prior = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+  const fields = ['type', 'date', 'amount', 'currency', 'exchangeRate', 'partyId', 'projectId',
+    'sourceAccountId', 'destinationAccountId', 'categoryId', 'obligationId', 'description',
+    'reference', 'reversalOf', 'allowExcess'] as const;
+  const current = data as unknown as Record<string, unknown>;
+  for (const field of fields) {
+    const before = prior[field];
+    const after = current[field];
+    if (field === 'amount' || field === 'exchangeRate') {
+      if (!sameMoney(String(before ?? '0'), String(after ?? '0'))) return false;
+    } else if ((before ?? '') !== (after ?? '')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function relatedReversals(adapter: DbAdapter, originalId: string): Promise<TransactionRow[]> {
+  return adapter.all<TransactionRow>(
+    "SELECT * FROM transactions WHERE reversal_of=? AND type IN ('reversal','refund')", [originalId],
+  );
+}
+
+/** Refunds/reversals can never exceed the amount of the original transaction. */
+async function remainingOriginal(adapter: DbAdapter, original: TransactionRow): Promise<Money> {
+  const rows = await relatedReversals(adapter, original.id);
+  return rows.reduce((acc, row) => {
+    if (row.currency !== original.currency) {
+      throw new Error(`Refund ${row.id} uses ${row.currency}; original transaction uses ${original.currency}`);
+    }
+    return acc.sub(row.amount);
+  }, Money.of(original.amount));
+}
+
+export function createTransaction(adapter: DbAdapter, input: TransactionInput): Promise<CreateTransactionResult> {
+  return serialize(adapter, () => createTransactionUnlocked(adapter, input));
+}
+
+async function createTransactionUnlocked(adapter: DbAdapter, input: TransactionInput): Promise<CreateTransactionResult> {
   const data = transactionSchema.parse(input);
   const key = data.idempotencyKey ?? uuid();
+  const base = Money.of(data.amount).mul(data.exchangeRate).round(2);
   const existing = await adapter.get<TransactionRow>('SELECT * FROM transactions WHERE idempotency_key = ?', [key]);
-  if (existing) return { id: existing.id, duplicate: true };
+  if (existing) {
+    const auditRow = await adapter.get<{ payload: string }>(
+      "SELECT payload FROM audit_logs WHERE entity_type='transaction' AND entity_id=? AND action='create' ORDER BY created_at DESC LIMIT 1",
+      [existing.id],
+    );
+    if (!matchesIdempotency(existing, data, base) || !matchesAuditPayload(auditRow?.payload, data)) {
+      throw new Error(`Idempotency key conflict: ${key} was already used with a different transaction payload`);
+    }
+    return { id: existing.id, duplicate: true };
+  }
 
   const id = uuid();
   const now = nowIso();
@@ -321,14 +541,25 @@ export async function createTransaction(adapter: DbAdapter, input: TransactionIn
     original = await adapter.get<TransactionRow>('SELECT * FROM transactions WHERE id=?', [data.reversalOf!]);
     if (!original) throw new Error('Original transaction not found');
     if (original.reversal_of) throw new Error('A reversal cannot itself be reversed');
+    const prior = await relatedReversals(adapter, original.id);
+    if (prior.length > 0 && (data.type === 'reversal' || isSettlementType(original.type))) {
+      throw new Error('This transaction has already been reversed; only one compensating settlement is allowed');
+    }
+    if (data.currency !== original.currency || !sameMoney(data.exchangeRate, original.exchange_rate)) {
+      throw new Error('Refunds and reversals must use the original currency and exchange rate (or supply matching explicit values)');
+    }
+    const remaining = await remainingOriginal(adapter, original);
+    if (Money.of(data.amount).isGreaterThan(remaining)) {
+      throw new Error(`Refund/reversal of ${data.amount} exceeds the remaining original amount ${remaining.toString()}`);
+    }
     originalPostings = await adapter.all<JournalRow>('SELECT * FROM journal_entries WHERE transaction_id=?', [original.id]);
   }
 
-  const base = Money.of(data.amount).mul(data.exchangeRate).round(2);
   const postings = buildPostings({
     type: data.type,
     amount: data.amount,
     exchangeRate: data.exchangeRate,
+    currency: data.currency,
     partyId: data.partyId || undefined,
     sourceAccountId: data.sourceAccountId || undefined,
     destinationAccountId: data.destinationAccountId || undefined,
@@ -344,31 +575,49 @@ export async function createTransaction(adapter: DbAdapter, input: TransactionIn
       data.categoryId || null, data.obligationId || null, data.description || null, data.reference || null,
       data.reversalOf || null, key, now, now],
   }];
-  insertJournal(statements, id, postings, data.date);
+  await insertJournal(adapter, statements, id, postings, data.date, { currency: data.currency, exchangeRate: data.exchangeRate, amount: data.amount });
 
-  if (['receivable_settlement', 'payable_settlement'].includes(data.type)) {
-    const obligationId = data.obligationId;
+  const isSettlement = isSettlementType(data.type);
+  const compensatesSettlement = Boolean(original && isSettlementType(original.type)
+    && (data.type === 'reversal' || data.type === 'refund'));
+  if (isSettlement || compensatesSettlement) {
+    const obligationId = isSettlement ? data.obligationId : original?.obligation_id;
     if (!obligationId) throw new Error('Select an obligation to settle');
     const obligation = await adapter.get<ObligationRow>('SELECT * FROM obligations WHERE id=?', [obligationId]);
     if (!obligation) throw new Error('Obligation not found');
     const settlements = await listSettlements(adapter, obligationId);
-    const outstanding = Money.of(obligation.total_amount).sub(settlements.reduce((a, s) => a.add(s.amount), Money.zero()));
-    if (!data.allowExcess && Money.of(data.amount).isGreaterThan(outstanding)) {
+    const signedAmount = isSettlement ? Money.of(data.amount) : Money.of(data.amount).negate();
+    const outstanding = obligationOutstanding(obligation, settlements);
+    if (isSettlement && !data.allowExcess && signedAmount.isGreaterThan(outstanding)) {
       throw new Error(`Payment of ${data.amount} exceeds outstanding ${outstanding.toString()}. Enable advance/excess payment to override.`);
     }
     const settlementId = uuid();
+    const hasReversalColumns = await hasColumn(adapter, 'settlements', 'reversed_at')
+      && await hasColumn(adapter, 'settlements', 'reversal_transaction_id');
     statements.push({
-      sql: `INSERT INTO settlements(id,obligation_id,transaction_id,amount,currency,allow_excess,created_at) VALUES (?,?,?,?,?,?,?)`,
-      params: [settlementId, obligationId, id, data.amount, obligation.currency, data.allowExcess ? 1 : 0, now],
+      sql: `INSERT INTO settlements(id,obligation_id,transaction_id,amount,currency,allow_excess,created_at${hasReversalColumns ? ',reversal_transaction_id' : ''})
+            VALUES (?,?,?,?,?,?,?${hasReversalColumns ? ',?' : ''})`,
+      params: [settlementId, obligationId, id, signedAmount.toString(), obligation.currency, data.allowExcess ? 1 : 0, now,
+        ...(hasReversalColumns ? [compensatesSettlement ? id : null] : [])],
     });
     statements.push({
       sql: `INSERT INTO settlement_allocations(id,settlement_id,obligation_id,amount,created_at) VALUES (?,?,?,?,?)`,
-      params: [uuid(), settlementId, obligationId, data.amount, now],
+      params: [uuid(), settlementId, obligationId, signedAmount.toString(), now],
     });
-    const remaining = Money.of(obligation.total_amount).sub(outstanding.add(data.amount));
+    if (compensatesSettlement && hasReversalColumns) {
+      statements.push({
+        sql: 'UPDATE settlements SET reversed_at=?, reversal_transaction_id=? WHERE transaction_id=?',
+        params: [now, id, original!.id],
+      });
+    }
+    const projected: SettlementRow[] = [...settlements, {
+      id: settlementId, obligation_id: obligationId, transaction_id: id, amount: signedAmount.toString(),
+      currency: obligation.currency, allow_excess: data.allowExcess ? 1 : 0, created_at: now,
+    }];
+    const status = settlementStatus(obligation, projected);
     statements.push({
       sql: 'UPDATE obligations SET status=?, updated_at=? WHERE id=?',
-      params: [remaining.isPositive() ? 'open' : (data.allowExcess ? 'overpaid' : 'settled'), now, obligationId],
+      params: [status, now, obligationId],
     });
   }
 
@@ -378,14 +627,27 @@ export async function createTransaction(adapter: DbAdapter, input: TransactionIn
   return { id, duplicate: false };
 }
 
-export async function reverseTransaction(adapter: DbAdapter, id: string, description = 'Reversal'): Promise<CreateTransactionResult> {
+export function reverseTransaction(adapter: DbAdapter, id: string, description = 'Reversal', effectiveDate?: string): Promise<CreateTransactionResult> {
+  return serialize(adapter, () => reverseTransactionUnlocked(adapter, id, description, effectiveDate));
+}
+
+async function reverseTransactionUnlocked(adapter: DbAdapter, id: string, description: string, effectiveDate?: string): Promise<CreateTransactionResult> {
   const original = await adapter.get<TransactionRow>('SELECT * FROM transactions WHERE id=?', [id]);
   if (!original) throw new Error('Transaction not found');
   if (original.reversal_of) throw new Error('A reversal cannot itself be reversed');
-  return createTransaction(adapter, {
+  const prior = await relatedReversals(adapter, original.id);
+  if (prior.some((row) => row.type === 'reversal')) throw new Error('This transaction has already been reversed');
+  const remaining = await remainingOriginal(adapter, original);
+  if (!remaining.isPositive()) throw new Error(`Transaction ${id} has no remaining amount to reverse`);
+  let date = original.txn_date;
+  if (effectiveDate !== undefined) {
+    if (!dateString.safeParse(effectiveDate).success) throw new Error('Reversal effective date must be a valid calendar date');
+    date = effectiveDate;
+  }
+  return createTransactionUnlocked(adapter, {
     type: 'reversal',
-    date: nowIso().slice(0, 10),
-    amount: original.amount,
+    date,
+    amount: remaining.toString(),
     currency: original.currency,
     exchangeRate: original.exchange_rate,
     partyId: original.party_id ?? undefined,
@@ -401,16 +663,31 @@ export async function reverseTransaction(adapter: DbAdapter, id: string, descrip
   });
 }
 
-export async function settleObligation(adapter: DbAdapter, input: SettlementInput): Promise<CreateTransactionResult> {
+export function settleObligation(adapter: DbAdapter, input: SettlementInput): Promise<CreateTransactionResult> {
+  return serialize(adapter, () => settleObligationUnlocked(adapter, input));
+}
+
+async function settleObligationUnlocked(adapter: DbAdapter, input: SettlementInput): Promise<CreateTransactionResult> {
   const data = settlementSchema.parse(input);
   const obligation = await adapter.get<ObligationRow>('SELECT * FROM obligations WHERE id=?', [data.obligationId]);
   if (!obligation) throw new Error('Obligation not found');
-  return createTransaction(adapter, {
+  const account = await adapter.get<AccountRow>('SELECT * FROM accounts WHERE id=?', [data.accountId]);
+  if (!account) throw new Error('Account not found');
+  const currency = data.currency ?? obligation.currency;
+  if (currency !== obligation.currency) {
+    throw new Error(`Settlement currency ${currency} does not match obligation currency ${obligation.currency}`);
+  }
+  const reportingCurrency = await baseCurrency(adapter);
+  const rate = data.exchangeRate ? Money.of(data.exchangeRate) : await resolveRate(adapter, obligation.currency, reportingCurrency, data.date);
+  await resolveRate(adapter, account.currency, reportingCurrency, data.date);
+  // Deterministic key: two identical clicks resolve to the same posting.
+  const key = data.idempotencyKey ?? `settlement:${obligation.id}:${data.date}:${data.amount}:${data.accountId}:${data.allowExcess ? 1 : 0}:${currency}:${rate.toString()}`;
+  return createTransactionUnlocked(adapter, {
     type: obligation.direction === 'receivable' ? 'receivable_settlement' : 'payable_settlement',
     date: data.date,
     amount: data.amount,
-    currency: obligation.currency,
-    exchangeRate: '1',
+    currency,
+    exchangeRate: rate.toString(),
     partyId: obligation.party_id,
     projectId: obligation.project_id ?? undefined,
     obligationId: obligation.id,
@@ -418,6 +695,7 @@ export async function settleObligation(adapter: DbAdapter, input: SettlementInpu
     sourceAccountId: obligation.direction === 'payable' ? data.accountId : undefined,
     description: data.description || `Settlement ${obligation.reference ?? obligation.id.slice(0, 8)}`,
     allowExcess: data.allowExcess,
+    idempotencyKey: key,
   });
 }
 

@@ -16,15 +16,17 @@ describe('Database migrations', () => {
     const indexes = (await db.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type='index'")).map((r) => r.name);
     expect(indexes).toContain('idx_transactions_date');
     expect(indexes).toContain('idx_obligations_party_dir');
+    expect(indexes).toContain('idx_exchange_rates_pair_date');
     const currencies = await db.all<{ code: string }>('SELECT code FROM currencies');
     expect(currencies.map((c) => c.code)).toContain('PKR');
-    expect(await currentSchemaVersion(db)).toBe(1);
+    expect(await currentSchemaVersion(db)).toBe(2);
   });
 
   it('is safe to initialize twice', async () => {
     const db = await createTestDb();
     await expect(initializeDatabase(db)).resolves.toBeUndefined();
-    expect((await db.get<{ count: number }>('SELECT COUNT(*) AS count FROM schema_migrations'))?.count).toBe(1);
+    expect((await db.get<{ count: number }>('SELECT COUNT(*) AS count FROM schema_migrations'))?.count).toBe(2);
+    expect(await currentSchemaVersion(db)).toBe(2);
   });
 
   it('enforces foreign keys and unique idempotency keys', async () => {

@@ -12,8 +12,8 @@ import type { ObligationRow, SettlementRow, TransactionRow } from '../core/types
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageHeader, Select, Table, Textarea, Toolbar } from '../components/ui';
 import { dateLabel, errorMessage, fmt, shortId, today } from '../lib/format';
 
-const emptyObligation = (direction: 'receivable' | 'payable', partyId: string, accountId: string): ObligationInput => ({
-  partyId, accountId, projectId: '', direction, reference: '', totalAmount: '', currency: 'PKR', dueDate: '', notes: '',
+const emptyObligation = (direction: 'receivable' | 'payable', partyId: string, accountId: string, baseCurrency = 'PKR'): ObligationInput => ({
+  partyId, accountId, projectId: '', direction, reference: '', totalAmount: '', currency: baseCurrency, dueDate: '', notes: '',
 });
 
 export default function ObligationsPage({ mode = 'all' }: { mode?: 'all' | 'receivable' | 'payable' }) {
@@ -154,11 +154,11 @@ function ObligationModal({ open, direction, parties, accounts, projects, onClose
   onClose: () => void;
   onSave: (input: ObligationInput) => Promise<string>;
 }) {
-  const { notify } = useAppStore();
+  const { notify, baseCurrency } = useAppStore();
   const [busy, setBusy] = useState(false);
   const form = useForm<ObligationInput>({
     resolver: zodResolver(obligationSchema) as unknown as Resolver<ObligationInput>,
-    defaultValues: emptyObligation(direction, parties[0]?.id ?? '', accounts[0]?.id ?? ''),
+    defaultValues: emptyObligation(direction, parties[0]?.id ?? '', accounts[0]?.id ?? '', baseCurrency),
   });
   const { register, handleSubmit, reset, formState: { errors } } = form;
   const [chosenDirection, setChosenDirection] = useState(direction);
@@ -166,8 +166,8 @@ function ObligationModal({ open, direction, parties, accounts, projects, onClose
   useEffect(() => {
     if (!open) return;
     setChosenDirection(direction);
-    reset(emptyObligation(direction, parties[0]?.id ?? '', accounts[0]?.id ?? ''));
-  }, [open, direction, parties, accounts, reset]);
+    reset(emptyObligation(direction, parties[0]?.id ?? '', accounts[0]?.id ?? '', baseCurrency));
+  }, [open, direction, parties, accounts, reset, baseCurrency]);
 
   return (
     <Modal open={open} onClose={onClose} title={chosenDirection === 'payable' ? 'New payable' : 'New receivable'}>
@@ -215,7 +215,7 @@ function PaymentModal({ obligation, accounts, onClose, onSave }: {
   onClose: () => void;
   onSave: (obligationId: string, amount: string, accountId: string, date: string, description: string, allowExcess: boolean) => Promise<unknown>;
 }) {
-  const { notify } = useAppStore();
+  const { notify, baseCurrency } = useAppStore();
   const [busy, setBusy] = useState(false);
   const form = useForm<SettlementInput>({
     resolver: zodResolver(settlementSchema) as unknown as Resolver<SettlementInput>,
@@ -237,7 +237,7 @@ function PaymentModal({ obligation, accounts, onClose, onSave }: {
         finally { setBusy(false); }
       })} className="space-y-4">
         <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600 dark:bg-navy-900 dark:text-slate-300">
-          Outstanding: <strong className="num">{fmt(obligation?.total_amount ?? '0', obligation?.currency ?? 'PKR')}</strong> total obligation.
+          Outstanding: <strong className="num">{fmt(obligation?.total_amount ?? '0', obligation?.currency ?? baseCurrency)}</strong> total obligation.
         </p>
         <input type="hidden" {...register('obligationId')} />
         <div className="grid gap-4 sm:grid-cols-2">

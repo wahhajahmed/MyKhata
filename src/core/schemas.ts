@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Money } from './money';
 
 export const decimalString = z
   .string()
@@ -6,9 +7,17 @@ export const decimalString = z
   .regex(/^-?\d+(\.\d+)?$/, 'Enter a valid decimal amount')
   .refine((v) => !Number.isNaN(Number(v)), 'Amount must be a valid number');
 
-export const positiveDecimal = decimalString.refine((v) => Number(v) > 0, 'Amount must be greater than zero');
+export const positiveDecimal = decimalString.refine((v) => Money.of(v).isPositive(), 'Amount must be greater than zero');
 
-export const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose a valid date');
+export const dateString = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Choose a valid date')
+  .refine((value) => {
+    const [year, month, day] = value.split('-').map((part) => Number(part));
+    if (year === undefined || month === undefined || day === undefined) return false;
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+  }, 'Choose a valid calendar date');
 
 export const partyTypeSchema = z.enum(['individual', 'company']);
 
@@ -70,6 +79,10 @@ export const settlementSchema = z.object({
   date: dateString,
   description: z.string().trim().max(300).optional().or(z.literal('')),
   allowExcess: z.boolean().default(false),
+  /** Optional explicit currency/rate for cross-currency settlements. */
+  currency: z.string().trim().min(3).max(10).optional(),
+  exchangeRate: decimalString.refine((v) => Money.of(v).isPositive(), 'Exchange rate must be greater than zero').optional(),
+  idempotencyKey: z.string().min(1).max(200).optional(),
 });
 
 export const exchangeRateSchema = z.object({
@@ -99,7 +112,7 @@ export const transactionSchema = z
     date: dateString,
     amount: positiveDecimal,
     currency: z.string().min(3).max(10),
-    exchangeRate: decimalString.default('1'),
+    exchangeRate: decimalString.refine((v) => Money.of(v).isPositive(), 'Exchange rate must be greater than zero').default('1'),
     partyId: z.string().uuid().optional().or(z.literal('')),
     projectId: z.string().uuid().optional().or(z.literal('')),
     sourceAccountId: z.string().uuid().optional().or(z.literal('')),

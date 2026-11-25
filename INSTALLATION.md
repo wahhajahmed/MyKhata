@@ -51,12 +51,12 @@ npm run desktop:build
 The NSIS installer is written to:
 
 ```text
-release/MyKhata Setup 0.1.0.exe
+release/MyKhata Setup 0.2.0.exe
 ```
 
 The installer allows choosing the installation directory and creates a desktop shortcut. MyKhata stores its SQLite database in Electron's per-user application data directory (`app.getPath('userData')/mykhata.sqlite`), not in the application folder.
 
-If `better-sqlite3` fails to load, rerun `npm run rebuild:electron` with the same Node/Electron versions used to build the app.
+If `better-sqlite3-multiple-ciphers` fails to load, rerun `npm run rebuild:electron` with the same Node/Electron versions used to build the app. `npm run desktop:build` performs this rebuild automatically.
 
 ## 4. Android (Capacitor)
 
@@ -84,13 +84,25 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 Install it with `adb install -r android/app/build/outputs/apk/debug/app-debug.apk` or copy it to the device. The debug APK is unsigned for distribution; generate a release keystore and signing configuration before publishing to a store. Never commit a keystore or signing credentials.
 
+For release builds, the release workflow accepts base64-encoded signing material in `MYKHATA_KEYSTORE_BASE64`, `MYKHATA_KEYSTORE_PASSWORD`, `MYKHATA_KEY_ALIAS`, and `MYKHATA_KEY_PASSWORD`. Without these secrets it produces an unsigned `assembleRelease`/`bundleRelease` build and labels it as such. It also derives `versionCode`/`versionName` from the release tag.
+
 ### Android build notes
 
 - Gradle 8.2.1 is provided by the wrapper in `android/gradle/wrapper`; a global Gradle installation is not required.
 - JDK 21 works with Gradle 8.2.1. JDK 26 is not compatible with this Gradle version.
 - The generated Android project targets SDK 34. Newer installed SDK platforms work, but the compile/target versions in `android/variables.gradle` should be checked when the Android tooling is upgraded.
 
-## 5. Optional Supabase sync
+## 5. Enable app lock and encryption (recommended)
+
+1. Open MyKhata on Windows or Android.
+2. Go to **Settings → Security & encryption** and choose **Enable app lock**.
+3. Enter a PIN (4–12 digits, not a trivial sequence) or a password of at least 8 characters with letters and numbers, then confirm it.
+4. The existing plaintext database is migrated in place to encrypted storage. No records are deleted. On Android, biometric unlock can then be enabled if the device has enrolled biometrics.
+5. On the next launch, unlock with the PIN/password before any financial screen appears. The app also auto-locks after 15 minutes of inactivity by default.
+
+Create and verify an encrypted backup immediately afterwards: a forgotten PIN cannot be recovered from the encrypted database. Disabling the lock requires the PIN and converts the database back to plaintext.
+
+## 6. Optional Supabase sync
 
 Sync is disabled unless both `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are provided in a local `.env` file. Start from `.env.example`:
 
@@ -102,11 +114,21 @@ The remote table must expose these columns: `id`, `entity_type`, `entity_id`, `o
 
 No data is uploaded until a user checks the explicit approval box on the Backup, Restore & Sync page and clicks **Sync now**.
 
-## Verification performed for 0.1.0
+## Verification
 
-- `npx tsc --noEmit -p tsconfig.json`
-- `npx tsc --noEmit -p tsconfig.electron.json`
-- `npm test` — 25 tests passing
-- `npm run build`
-- `npm run desktop:build`
-- `npx cap add android` followed by `assembleDebug`
+For 0.2.0, the following were run locally before release preparation:
+
+```bash
+npx tsc --noEmit -p tsconfig.json
+npx tsc --noEmit -p tsconfig.electron.json
+npm test
+npm run desktop:build
+npx cap sync android
+./android/gradlew -p android assembleDebug --no-daemon
+./android/gradlew -p android assembleRelease bundleRelease --no-daemon \
+  -PmykhataVersionCode=200 -PmykhataVersionName=0.2.0
+```
+
+Results: both typechecks passed, 60 tests passed, the Windows installer and all Android targets built successfully, and production output contains no source maps. Exact results and limitations are recorded in `CHANGELOG.md`.
+
+Signed artifacts require signing secrets; the release workflow otherwise produces clearly labelled unsigned builds and a draft GitHub release. Real-device Android encryption/biometric and offline checks remain manual release steps.

@@ -5,7 +5,11 @@ export interface Posting {
   accountCode: string;
   partyId: string | null;
   direction: 'debit' | 'credit';
+  /** Base-currency amount; the journal's authoritative balance column. */
   amount: Money;
+  /** Original-currency amount and code, preserved for multi-currency rows. */
+  originalAmount?: Money;
+  currency?: string;
 }
 
 export const accountCode = (accountId: string): string => `ASSET:ACCOUNT:${accountId}`;
@@ -40,6 +44,7 @@ export function buildPostings(
     type: TransactionRow['type'];
     amount: string;
     exchangeRate: string;
+    currency?: string;
     partyId?: string;
     sourceAccountId?: string;
     destinationAccountId?: string;
@@ -52,12 +57,16 @@ export function buildPostings(
   const source = input.sourceAccountId ?? null;
   const destination = input.destinationAccountId ?? null;
   const category = input.categoryId ?? null;
+  const originalAmount = Money.of(input.amount);
+  const currency = input.currency;
 
   const make = (code: string, direction: 'debit' | 'credit', owner: string | null = null): Posting => ({
     accountCode: code,
     partyId: owner,
     direction,
     amount: base,
+    originalAmount,
+    currency,
   });
 
   let postings: Posting[];
@@ -95,7 +104,9 @@ export function buildPostings(
         accountCode: entry.account_code,
         partyId: entry.party_id,
         direction: entry.direction === 'debit' ? 'credit' : 'debit',
-        amount: Money.of(input.amount).mul(input.exchangeRate).round(2),
+        amount: base,
+        originalAmount,
+        currency: currency ?? entry.original_currency ?? entry.currency,
       } as Posting));
       break;
     }
@@ -124,11 +135,22 @@ export function partyBalances(entries: JournalRow[], partyId: string): { receiva
   return { receivable, payable };
 }
 
+/**
+ * Outstanding amount in the obligation's currency. Compensating settlement rows
+ * carry a negative amount; summing signed rows is what keeps the obligation,
+ * the settlement list and the reports in agreement after a reversal.
+ */
 export function obligationOutstanding(obligation: ObligationRow, settlements: SettlementRow[]): Money {
   const paid = settlements
     .filter((s) => s.obligation_id === obligation.id)
     .reduce((acc, s) => acc.add(s.amount), Money.zero());
   return Money.of(obligation.total_amount).sub(paid);
+}
+
+/** Exact status: positive remaining is open, zero is settled, negative is overpaid. */
+export function settlementStatus(obligation: ObligationRow, settlements: SettlementRow[]): 'open' | 'settled' | 'overpaid' {
+  const remaining = obligationOutstanding(obligation, settlements);
+  return remaining.isPositive() ? 'open' : remaining.isNegative() ? 'overpaid' : 'settled';
 }
 
 export function totalForType(entries: JournalRow[], prefix: string): Money {

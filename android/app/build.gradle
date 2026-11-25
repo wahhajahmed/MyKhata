@@ -7,8 +7,9 @@ android {
         applicationId "com.mykhata.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // CI/release injects these from the release tag; local builds stay at 1.
+        versionCode (project.findProperty('mykhataVersionCode') as Integer ?: 1)
+        versionName (project.findProperty('mykhataVersionName') as String ?: "1.0")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +17,25 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            // Credentials are supplied only by CI/release secrets. Never commit a keystore.
+            def store = System.getenv('MYKHATA_KEYSTORE_FILE')
+            if (store) {
+                storeFile file(store)
+                storePassword System.getenv('MYKHATA_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('MYKHATA_KEY_ALIAS')
+                keyPassword System.getenv('MYKHATA_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (System.getenv('MYKHATA_KEYSTORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

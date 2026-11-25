@@ -11,8 +11,8 @@ import type { ProjectRow } from '../core/types';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageHeader, Select, Table, Textarea, Toolbar } from '../components/ui';
 import { dateLabel, errorMessage, fmt, shortId, today } from '../lib/format';
 
-const emptyProject = (partyId: string): ProjectInput => ({
-  partyId, name: '', agreedAmount: '', currency: 'PKR', startDate: today(),
+const emptyProject = (partyId: string, baseCurrency = 'PKR'): ProjectInput => ({
+  partyId, name: '', agreedAmount: '', currency: baseCurrency, startDate: today(),
   expectedCompletion: '', dueDate: '', status: 'planning', notes: '',
 });
 
@@ -108,11 +108,11 @@ function ProjectModal({ open, project, parties, onClose, onSave }: {
   onClose: () => void;
   onSave: (input: ProjectInput, id?: string) => Promise<string>;
 }) {
-  const { notify } = useAppStore();
+  const { notify, baseCurrency } = useAppStore();
   const [busy, setBusy] = useState(false);
   const form = useForm<ProjectInput>({
     resolver: zodResolver(projectSchema) as unknown as Resolver<ProjectInput>,
-    defaultValues: emptyProject(parties[0]?.id ?? ''),
+    defaultValues: emptyProject(parties[0]?.id ?? '', baseCurrency),
   });
   const { register, handleSubmit, reset, formState: { errors } } = form;
 
@@ -123,8 +123,8 @@ function ProjectModal({ open, project, parties, onClose, onSave }: {
       currency: project.currency, startDate: project.start_date,
       expectedCompletion: project.expected_completion ?? '', dueDate: project.due_date ?? '',
       status: project.status as ProjectInput['status'], notes: project.notes ?? '',
-    } : emptyProject(parties[0]?.id ?? ''));
-  }, [open, project, parties, reset]);
+    } : emptyProject(parties[0]?.id ?? '', baseCurrency));
+  }, [open, project, parties, reset, baseCurrency]);
 
   return (
     <Modal open={open} onClose={onClose} title={project ? 'Edit project' : 'New project'}>

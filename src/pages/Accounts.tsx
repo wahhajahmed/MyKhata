@@ -12,9 +12,9 @@ import type { AccountRow } from '../core/types';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, Modal, PageHeader, Select, Table, Textarea, Toolbar } from '../components/ui';
 import { dateLabel, errorMessage, fmt, today } from '../lib/format';
 
-const emptyAccount: AccountInput = {
-  name: '', bankName: '', nickname: '', kind: 'bank', currency: 'PKR', openingBalance: '0', notes: '',
-};
+const emptyAccount = (baseCurrency = 'PKR'): AccountInput => ({
+  name: '', bankName: '', nickname: '', kind: 'bank', currency: baseCurrency, openingBalance: '0', notes: '',
+});
 
 export default function AccountsPage() {
   const { accounts, saveAccount, adapter, refresh, notify, preset, from, to } = useAppStore();
@@ -111,12 +111,12 @@ export default function AccountsPage() {
 }
 
 function ExchangeRates() {
-  const { adapter, notify } = useAppStore();
+  const { adapter, notify, baseCurrency } = useAppStore();
   const [rates, setRates] = useState<Array<{ id: string; from_code: string; to_code: string; rate: string; rate_date: string; source: string }>>([]);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [from, setFrom] = useState('USD');
-  const [to, setTo] = useState('PKR');
+  const [to, setTo] = useState(baseCurrency);
   const [date, setDate] = useState(today());
 
   const load = () => { if (adapter) void listExchangeRates(adapter).then(setRates); };
@@ -126,6 +126,8 @@ function ExchangeRates() {
     resolver: zodResolver(exchangeRateSchema) as unknown as Resolver<ExchangeRateInput>,
     defaultValues: { fromCurrency: from, toCurrency: to, rate: '', rateDate: date, source: 'manual' },
   });
+  const { setValue } = form;
+  useEffect(() => { setTo(baseCurrency); setValue('toCurrency', baseCurrency); }, [baseCurrency, setValue]);
 
   return (
     <Card className="mt-4 overflow-hidden">
@@ -160,7 +162,7 @@ function ExchangeRates() {
             </tr>
           ))}
         </Table>
-      ) : <p className="p-4 text-xs text-slate-400">No rates saved. PKR is always 1:1.</p>}
+      ) : <p className="p-4 text-xs text-slate-400">No rates saved. {baseCurrency} is always 1:1.</p>}
     </Card>
   );
 }
@@ -171,11 +173,11 @@ function AccountModal({ open, account, onClose, onSave }: {
   onClose: () => void;
   onSave: (input: AccountInput, id?: string) => Promise<string>;
 }) {
-  const { notify } = useAppStore();
+  const { notify, baseCurrency } = useAppStore();
   const [busy, setBusy] = useState(false);
   const form = useForm<AccountInput>({
     resolver: zodResolver(accountSchema) as unknown as Resolver<AccountInput>,
-    defaultValues: emptyAccount,
+    defaultValues: emptyAccount(baseCurrency),
   });
   const { register, handleSubmit, reset, formState: { errors } } = form;
 
@@ -184,8 +186,8 @@ function AccountModal({ open, account, onClose, onSave }: {
     reset(account ? {
       name: account.name, bankName: account.bank_name ?? '', nickname: account.nickname ?? '',
       kind: account.kind, currency: account.currency, openingBalance: account.opening_balance, notes: account.notes ?? '',
-    } : emptyAccount);
-  }, [open, account, reset]);
+    } : emptyAccount(baseCurrency));
+  }, [open, account, reset, baseCurrency]);
 
   return (
     <Modal open={open} onClose={onClose} title={account ? 'Edit account' : 'Add account'}>

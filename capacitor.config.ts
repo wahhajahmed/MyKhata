@@ -8,6 +8,16 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: false,
   },
+  plugins: {
+    CapacitorSQLite: {
+      androidIsEncryption: true,
+      androidBiometric: {
+        // App-level biometrics are handled by @aparajita/capacitor-biometric-auth,
+        // not by the SQLite plugin's own prompt.
+        biometricAuth: false,
+      },
+    },
+  },
 };
 
 export default config;
