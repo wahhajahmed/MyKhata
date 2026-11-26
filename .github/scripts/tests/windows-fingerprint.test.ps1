@@ -25,23 +25,25 @@ function Find-SignTool {
   return $found
 }
 
+function Test-IsAdministrator {
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+  return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 function Add-TestCertificateToStore {
   param(
-    [byte[]]$RawCertificate,
+    [string]$CerPath,
     [string]$StoreName
   )
 
-  $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
-    $StoreName,
-    [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-  )
-  try {
-    $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-    $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($RawCertificate)
-    $store.Add($certificate)
-  } finally {
-    $store.Close()
+  $scope = if (Test-IsAdministrator) { 'LocalMachine' } else { 'CurrentUser' }
+  if ($scope -eq 'LocalMachine') {
+    certutil -addstore -f $StoreName $CerPath | Out-Null
+  } else {
+    'y' | certutil -user -addstore -f $StoreName $CerPath | Out-Null
   }
+  Assert-True ($LASTEXITCODE -eq 0) "Could not add the test certificate to $scope $StoreName."
 }
 
 function Remove-TestCertificateFromStore {
@@ -50,19 +52,10 @@ function Remove-TestCertificateFromStore {
     [string]$StoreName
   )
 
-  $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
-    $StoreName,
-    [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-  )
-  try {
-    $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-    foreach ($item in @($store.Certificates)) {
-      if ($item.Thumbprint -eq $Thumbprint) {
-        $store.Remove($item)
-      }
-    }
-  } finally {
-    $store.Close()
+  if (Test-IsAdministrator) {
+    certutil -delstore -f $StoreName $Thumbprint | Out-Null
+  } else {
+    certutil -user -delstore -f $StoreName $Thumbprint | Out-Null
   }
 }
 
@@ -165,9 +158,9 @@ try {
   $publicCertificate = $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
   $cer = Join-Path $testRoot 'test-signing-cert.cer'
   [IO.File]::WriteAllBytes($cer, $publicCertificate)
-  Add-TestCertificateToStore -RawCertificate $publicCertificate -StoreName 'Root'
-  Add-TestCertificateToStore -RawCertificate $publicCertificate -StoreName 'TrustedPublisher'
-  Write-Host '[6/9] Test certificate added to CurrentUser trust stores.'
+  Add-TestCertificateToStore -CerPath $cer -StoreName 'Root'
+  Add-TestCertificateToStore -CerPath $cer -StoreName 'TrustedPublisher'
+  Write-Host '[6/9] Test certificate added to the active trust stores.'
 
   $verify = Join-Path $scriptsDir 'verify-windows-release.ps1'
   $env:RELEASE_VERSION = $version

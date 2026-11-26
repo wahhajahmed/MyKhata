@@ -55,7 +55,7 @@ describe('release gate regressions', () => {
       expect(read(script)).toContain('64-character SHA-256 fingerprint')
     }
     expect(read('.github/scripts/tests/windows-fingerprint.test.ps1'))
-      .toContain("Add-TestCertificateToStore -RawCertificate $publicCertificate -StoreName 'Root'")
+      .toContain("if (Test-IsAdministrator) { 'LocalMachine' } else { 'CurrentUser' }")
   })
 
   it('parses indented keytool SHA-256 fingerprints', () => {
