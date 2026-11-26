@@ -25,6 +25,47 @@ function Find-SignTool {
   return $found
 }
 
+function Add-TestCertificateToStore {
+  param(
+    [byte[]]$RawCertificate,
+    [string]$StoreName
+  )
+
+  $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+    $StoreName,
+    [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+  )
+  try {
+    $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+    $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($RawCertificate)
+    $store.Add($certificate)
+  } finally {
+    $store.Close()
+  }
+}
+
+function Remove-TestCertificateFromStore {
+  param(
+    [string]$Thumbprint,
+    [string]$StoreName
+  )
+
+  $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+    $StoreName,
+    [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+  )
+  try {
+    $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+    foreach ($item in @($store.Certificates)) {
+      if ($item.Thumbprint -eq $Thumbprint) {
+        $store.Remove($item)
+      }
+    }
+  } finally {
+    $store.Close()
+  }
+}
+
 function Invoke-PowerShellScript {
   param(
     [string]$Script,
@@ -124,10 +165,8 @@ try {
   $publicCertificate = $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
   $cer = Join-Path $testRoot 'test-signing-cert.cer'
   [IO.File]::WriteAllBytes($cer, $publicCertificate)
-  certutil -user -addstore -f Root $cer | Out-Null
-  Assert-True ($LASTEXITCODE -eq 0) 'Could not add the test certificate to CurrentUser Root.'
-  certutil -user -addstore -f TrustedPublisher $cer | Out-Null
-  Assert-True ($LASTEXITCODE -eq 0) 'Could not add the test certificate to CurrentUser TrustedPublisher.'
+  Add-TestCertificateToStore -RawCertificate $publicCertificate -StoreName 'Root'
+  Add-TestCertificateToStore -RawCertificate $publicCertificate -StoreName 'TrustedPublisher'
   Write-Host '[6/9] Test certificate added to CurrentUser trust stores.'
 
   $verify = Join-Path $scriptsDir 'verify-windows-release.ps1'
@@ -176,11 +215,12 @@ try {
   Write-Host '[9/9] Missing fingerprint secret rejected by both scripts.'
 
   Write-Host 'Windows SHA-256 fingerprint tests passed.'
+  exit 0
 } finally {
   if ($certificate) {
-    certutil -user -f -delstore Root $certificate.Thumbprint | Out-Null
-    certutil -user -f -delstore TrustedPublisher $certificate.Thumbprint | Out-Null
-    Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
+    foreach ($store in @('Root', 'TrustedPublisher', 'My')) {
+      Remove-TestCertificateFromStore -Thumbprint $certificate.Thumbprint -StoreName $store
+    }
   }
   Remove-Item Env:CSC_BASE64, Env:CSC_PASSWORD, Env:MYKHATA_WINDOWS_CERT_SHA256, Env:RELEASE_VERSION -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue

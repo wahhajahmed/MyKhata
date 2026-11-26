@@ -16,7 +16,7 @@ All notable changes to MyKhata are documented here. The format follows Keep a Ch
 - Windows release fingerprint validation now hashes the signing certificate's DER-encoded bytes with SHA-256 instead of comparing `X509Certificate2.Thumbprint`, which is SHA-1. Tests prove correct, colon-separated lowercase and incorrect fingerprints are handled correctly by both signing scripts.
 - Windows builds now pass `-p never` to `electron-builder`, so CI and release builds cannot auto-publish or require a `GH_TOKEN`. Android CI no longer uses `android-actions/setup-android@v3`, which fails on current runners because it installs the removed `sdkmanager tools` package; the preinstalled SDK and explicit license acceptance are used instead. Regression tests guard both behaviours.
 - Android keystore and AAB certificate fingerprint parsing now tolerates the leading whitespace emitted by current `keytool` versions; an indented `SHA256:` line previously caused valid signing material to be rejected.
-- Windows SHA-256 DER certificate pinning is now mandatory in both pre-build validation and signed-installer verification, must be 64 hexadecimal characters, and fails closed when missing or malformed. The Windows fingerprint test now adds its disposable certificate with `certutil -f` so hosted runners cannot block on an interactive confirmation.
+- Windows SHA-256 DER certificate pinning is now mandatory in both pre-build validation and signed-installer verification, must be 64 hexadecimal characters, and fails closed when missing or malformed. The Windows fingerprint test now imports its disposable certificate through the direct .NET certificate-store API so hosted runners cannot block on an interactive confirmation.
 
 ### Verification
 
