@@ -8,12 +8,15 @@ All notable changes to MyKhata are documented here. The format follows Keep a Ch
 
 - The manual release workflow is now deny-by-default: Windows and Android signing credentials must exist and validate before any build starts; missing or invalid credentials fail the workflow.
 - Windows installers are verified with SignTool Authenticode verification and product/version identity checks. Android APKs are verified with `apksigner`, AABs with `jarsigner`/`keytool` plus `bundletool` manifest parsing, and both are checked against `com.mykhata.app`, versionName and versionCode.
-- SHA-256 checksums are generated for every release artifact, and only verified, signed artifacts are uploaded. GitHub drafts are created only after all verification jobs pass and are never published automatically.
+- SHA-256 checksums are generated for every release artifact, and only verified, signed artifacts are uploaded. GitHub drafts are created only after all verification jobs pass and are never published automatically. Signed artifacts are staged under the production names `MyKhata Setup 0.2.0.exe`, `MyKhata-0.2.0.apk` and `MyKhata-0.2.0.aab`, with their checksums merged into one verified `SHA256SUMS.txt` so no release asset names collide.
 - Android production builds require a complete existing keystore through protected environment variables and pin its certificate SHA-256 fingerprint so a replacement keystore cannot be used silently.
 
 ### Fixed
 
 - Windows release fingerprint validation now hashes the signing certificate's DER-encoded bytes with SHA-256 instead of comparing `X509Certificate2.Thumbprint`, which is SHA-1. Tests prove correct, colon-separated lowercase and incorrect fingerprints are handled correctly by both signing scripts.
+- Windows builds now pass `-p never` to `electron-builder`, so CI and release builds cannot auto-publish or require a `GH_TOKEN`. Android CI no longer uses `android-actions/setup-android@v3`, which fails on current runners because it installs the removed `sdkmanager tools` package; the preinstalled SDK and explicit license acceptance are used instead. Regression tests guard both behaviours.
+- Android keystore and AAB certificate fingerprint parsing now tolerates the leading whitespace emitted by current `keytool` versions; an indented `SHA256:` line previously caused valid signing material to be rejected.
+- Windows SHA-256 DER certificate pinning is now mandatory in both pre-build validation and signed-installer verification, must be 64 hexadecimal characters, and fails closed when missing or malformed.
 
 ### Verification
 

@@ -89,7 +89,7 @@ Install it with `adb install -r android/app/build/outputs/apk/debug/app-debug.ap
 Production release builds are signed and verified by the manual release workflow; unsigned release artifacts are never uploaded. It requires these protected repository secrets:
 
 - Android: `MYKHATA_KEYSTORE_BASE64`, `MYKHATA_KEYSTORE_PASSWORD`, `MYKHATA_KEY_ALIAS`, `MYKHATA_KEY_PASSWORD`, and `MYKHATA_KEYSTORE_CERT_SHA256`.
-- Windows: `MYKHATA_WINDOWS_CSC_BASE64` and `MYKHATA_WINDOWS_CSC_PASSWORD`; `MYKHATA_WINDOWS_CERT_SHA256` is an optional SHA-256 certificate fingerprint pin.
+- Windows: `MYKHATA_WINDOWS_CSC_BASE64`, `MYKHATA_WINDOWS_CSC_PASSWORD`, and `MYKHATA_WINDOWS_CERT_SHA256` (the required SHA-256 DER certificate fingerprint pin).
 
 Generate the Windows pin from the DER-encoded signing certificate (do **not** use the SHA-1 `Thumbprint`):
 

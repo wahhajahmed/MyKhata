@@ -60,7 +60,7 @@ try {
     -Subject 'CN=MyKhata Windows Fingerprint Test' `
     -CertStoreLocation 'Cert:\CurrentUser\My'
   Export-PfxCertificate -Cert $certificate -FilePath $pfx -Password $securePassword | Out-Null
-  Write-Host '[1/8] Temporary code-signing certificate created.'
+  Write-Host '[1/9] Temporary code-signing certificate created.'
 
   # Independent calculation: SHA-256 over the certificate's DER-encoded bytes.
   $algorithm = [System.Security.Cryptography.SHA256]::Create()
@@ -83,7 +83,7 @@ try {
     'Shared helper must compute the SHA-256 DER fingerprint.'
   Assert-True ((Normalize-WindowsCertificateFingerprint $spacedLowercase) -eq $fingerprint) `
     'Shared helper must remove colons/spaces and uppercase the fingerprint.'
-  Write-Host '[2/8] Shared SHA-256 helper and normalization assertions passed.'
+  Write-Host '[2/9] Shared SHA-256 helper and normalization assertions passed.'
 
   # prepare-windows-signing.ps1: correct fingerprint accepted, incorrect rejected.
   $prepare = Join-Path $scriptsDir 'prepare-windows-signing.ps1'
@@ -95,7 +95,7 @@ try {
   $result = Invoke-PowerShellScript -Script $prepare -Arguments @('-Destination', $preparedCorrect)
   Assert-True ($result.ExitCode -eq 0) "Correct SHA-256 fingerprint was rejected by prepare script: $($result.Output)"
   Assert-True (Test-Path -LiteralPath $preparedCorrect) 'Prepare script did not write the decoded certificate.'
-  Write-Host '[3/8] Prepare script accepted the correct SHA-256 fingerprint.'
+  Write-Host '[3/9] Prepare script accepted the correct SHA-256 fingerprint.'
 
   $env:MYKHATA_WINDOWS_CERT_SHA256 = $wrongFingerprint
   $preparedWrong = Join-Path $testRoot 'prepared-wrong.pfx'
@@ -103,7 +103,7 @@ try {
   Assert-True ($result.ExitCode -ne 0) 'Incorrect SHA-256 fingerprint was accepted by prepare script.'
   Assert-True ($result.Output -match 'SHA-256 fingerprint') `
     "Prepare script failure should name the SHA-256 fingerprint: $($result.Output)"
-  Write-Host '[4/8] Prepare script rejected the incorrect SHA-256 fingerprint.'
+  Write-Host '[4/9] Prepare script rejected the incorrect SHA-256 fingerprint.'
 
   # verify-windows-release.ps1: sign a copy of the local installer with the test cert.
   $version = (Get-Content -LiteralPath (Join-Path $repoRoot 'package.json') -Raw | ConvertFrom-Json).version
@@ -119,7 +119,7 @@ try {
   $signtool = Find-SignTool
   $signOutput = & $signtool sign /fd SHA256 /f $pfx /p $password $installer 2>&1
   Assert-True ($LASTEXITCODE -eq 0) "Test certificate could not sign the installer: $signOutput"
-  Write-Host '[5/8] Temporary installer signed with the test certificate.'
+  Write-Host '[5/9] Temporary installer signed with the test certificate.'
 
   $publicCertificate = $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
   $cer = Join-Path $testRoot 'test-signing-cert.cer'
@@ -128,7 +128,7 @@ try {
   Assert-True ($LASTEXITCODE -eq 0) 'Could not add the test certificate to CurrentUser Root.'
   certutil -user -addstore TrustedPublisher $cer | Out-Null
   Assert-True ($LASTEXITCODE -eq 0) 'Could not add the test certificate to CurrentUser TrustedPublisher.'
-  Write-Host '[6/8] Test certificate added to CurrentUser trust stores.'
+  Write-Host '[6/9] Test certificate added to CurrentUser trust stores.'
 
   $verify = Join-Path $scriptsDir 'verify-windows-release.ps1'
   $env:RELEASE_VERSION = $version
@@ -142,7 +142,7 @@ try {
   Assert-True ($result.ExitCode -eq 0) "Correct SHA-256 fingerprint was rejected by verify script: $($result.Output)"
   Assert-True (Test-Path -LiteralPath (Join-Path $verifiedCorrect 'SHA256SUMS.txt')) `
     'Verify script did not stage checksums for the correctly signed installer.'
-  Write-Host '[7/8] Verify script accepted the correct SHA-256 fingerprint.'
+  Write-Host '[7/9] Verify script accepted the correct SHA-256 fingerprint.'
 
   $env:MYKHATA_WINDOWS_CERT_SHA256 = $wrongFingerprint
   $verifiedWrong = Join-Path $testRoot 'verified-wrong'
@@ -154,7 +154,26 @@ try {
   Assert-True ($result.ExitCode -ne 0) 'Incorrect SHA-256 fingerprint was accepted by verify script.'
   Assert-True ($result.Output -match 'SHA-256 fingerprint') `
     "Verify script failure should name the SHA-256 fingerprint: $($result.Output)"
-  Write-Host '[8/8] Verify script rejected the incorrect SHA-256 fingerprint.'
+  Write-Host '[8/9] Verify script rejected the incorrect SHA-256 fingerprint.'
+
+  # Missing fingerprint secret must fail closed in both scripts.
+  $env:MYKHATA_WINDOWS_CERT_SHA256 = ''
+  $result = Invoke-PowerShellScript -Script $prepare -Arguments @(
+    '-Destination', (Join-Path $testRoot 'prepared-missing.pfx')
+  )
+  Assert-True ($result.ExitCode -ne 0) 'Missing fingerprint secret was accepted by prepare script.'
+  Assert-True ($result.Output -match 'MYKHATA_WINDOWS_CERT_SHA256 is missing.') `
+    "Prepare script failure should name the missing fingerprint secret: $($result.Output)"
+
+  $result = Invoke-PowerShellScript -Script $verify -Arguments @(
+    '-ReleaseVersion', $version,
+    '-InstallerPath', $installer,
+    '-VerifiedDir', (Join-Path $testRoot 'verified-missing')
+  )
+  Assert-True ($result.ExitCode -ne 0) 'Missing fingerprint secret was accepted by verify script.'
+  Assert-True ($result.Output -match 'MYKHATA_WINDOWS_CERT_SHA256 is missing.') `
+    "Verify script failure should name the missing fingerprint secret: $($result.Output)"
+  Write-Host '[9/9] Missing fingerprint secret rejected by both scripts.'
 
   Write-Host 'Windows SHA-256 fingerprint tests passed.'
 } finally {

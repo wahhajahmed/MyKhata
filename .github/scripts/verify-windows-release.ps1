@@ -17,6 +17,14 @@ function Fail([string]$Message) {
   throw $Message
 }
 
+if ([string]::IsNullOrWhiteSpace($env:MYKHATA_WINDOWS_CERT_SHA256)) {
+  Fail 'Required secret MYKHATA_WINDOWS_CERT_SHA256 is missing.'
+}
+$expectedFingerprint = Normalize-WindowsCertificateFingerprint $env:MYKHATA_WINDOWS_CERT_SHA256
+if ($expectedFingerprint -notmatch '^[0-9A-F]{64}$') {
+  Fail 'MYKHATA_WINDOWS_CERT_SHA256 must be a 64-character SHA-256 fingerprint.'
+}
+
 if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) {
   Fail "Expected signed installer was not found: $InstallerPath"
 }
@@ -56,12 +64,9 @@ if (-not $signature.SignerCertificate) {
   Fail 'Authenticode signature has no signer certificate.'
 }
 
-if (-not [string]::IsNullOrWhiteSpace($env:MYKHATA_WINDOWS_CERT_SHA256)) {
-  $expected = Normalize-WindowsCertificateFingerprint $env:MYKHATA_WINDOWS_CERT_SHA256
-  $actual = Get-WindowsCertificateSha256 -Certificate $signature.SignerCertificate
-  if ($actual -ne $expected) {
-    Fail 'The signed installer SHA-256 fingerprint does not match the pinned certificate.'
-  }
+$actualFingerprint = Get-WindowsCertificateSha256 -Certificate $signature.SignerCertificate
+if ($actualFingerprint -ne $expectedFingerprint) {
+  Fail 'The signed installer SHA-256 fingerprint does not match the pinned certificate.'
 }
 
 $versionInfo = (Get-Item -LiteralPath $InstallerPath).VersionInfo

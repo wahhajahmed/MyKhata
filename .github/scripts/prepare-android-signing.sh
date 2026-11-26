@@ -51,7 +51,7 @@ keytool -list -v \
 grep -q 'PrivateKeyEntry' "$temporary/keystore.txt" \
   || fail 'The Android signing alias is not a PrivateKeyEntry.'
 
-actual="$(sed -n 's/^SHA256:[[:space:]]*//p' "$temporary/keystore.txt" \
+actual="$(sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' "$temporary/keystore.txt" \
   | head -n 1 | tr -d ':\r\n' | tr '[:lower:]' '[:upper:]')"
 expected="$(printf '%s' "$MYKHATA_KEYSTORE_CERT_SHA256" | tr -d '[:space:]:' | tr '[:lower:]' '[:upper:]')"
 [[ -n "$actual" ]] || fail 'Could not read the keystore certificate fingerprint.'

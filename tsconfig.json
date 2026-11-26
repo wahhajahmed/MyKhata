@@ -19,5 +19,5 @@
     "exactOptionalPropertyTypes": false,
     "types": ["vitest/globals", "@testing-library/jest-dom", "vite/client", "node"]
   },
-  "include": ["src", "vite.config.ts", "capacitor.config.ts"]
+  "include": ["src", "tests", "vite.config.ts", "capacitor.config.ts"]
 }

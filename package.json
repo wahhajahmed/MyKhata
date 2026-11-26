@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "electron:build-main": "tsc -p tsconfig.electron.json",
     "desktop:dev": "npm run electron:build-main && electron .",
-    "desktop:build": "npm run rebuild:electron && npm run build && npm run electron:build-main && electron-builder --win --x64",
+    "desktop:build": "npm run rebuild:electron && npm run build && npm run electron:build-main && electron-builder --win --x64 -p never",
     "rebuild:electron": "electron-rebuild -f -w better-sqlite3-multiple-ciphers",
     "cap:add": "cap add android",
     "cap:sync": "cap sync android",

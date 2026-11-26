@@ -37,7 +37,7 @@ This document describes the guarantees implemented in MyKhata 0.2.0. It is not a
 - **Physical Android SQLCipher, biometric and airplane-mode checks remain manual release checks.** Physical unlock-after-restart with SQLCipher, biometric unlock, and airplane-mode offline operation on Android and Windows have not been demonstrated with device evidence. Automated builds, typechecks and unit tests do not verify them, so they must be completed manually before publishing.
 - **Local verification builds are unsigned.** The manual release workflow is deny-by-default: required Windows/Android signing secrets must validate before builds, both platforms must pass signature and identity verification, and only verified artifacts are uploaded. GitHub releases are created as drafts only and are never published automatically.
 - **Android keystore identity is pinned.** The release workflow requires `MYKHATA_KEYSTORE_CERT_SHA256` and rejects a different keystore certificate rather than silently using a replacement key.
-- **Windows certificate identity is pinned by SHA-256 DER fingerprint.** The optional `MYKHATA_WINDOWS_CERT_SHA256` secret must be the SHA-256 hash of the signing certificate's DER-encoded bytes (`X509Certificate2.RawData`), not the SHA-1 `Thumbprint`. Generate it with:
+- **Windows certificate identity is pinned by SHA-256 DER fingerprint.** The required `MYKHATA_WINDOWS_CERT_SHA256` secret must be the SHA-256 hash of the signing certificate's DER-encoded bytes (`X509Certificate2.RawData`), not the SHA-1 `Thumbprint`. Generate it with:
 
   ```powershell
   $pfx = 'C:\secure\mykhata-code-signing.pfx'

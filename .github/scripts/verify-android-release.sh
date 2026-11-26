@@ -43,16 +43,19 @@ java_bin="$(command -v java || true)"
 [[ -n "$jarsigner_bin" ]] || fail 'jarsigner was not found on PATH.'
 [[ -n "$java_bin" ]] || fail 'java was not found on PATH.'
 
-apk='android/app/build/outputs/apk/release/app-release.apk'
-aab='android/app/build/outputs/bundle/release/app-release.aab'
-[[ -f "$apk" ]] || fail 'Signed release APK app-release.apk is missing.'
-[[ -f "$aab" ]] || fail 'Signed release AAB app-release.aab is missing.'
+source_apk='android/app/build/outputs/apk/release/app-release.apk'
+source_aab='android/app/build/outputs/bundle/release/app-release.aab'
+[[ -f "$source_apk" ]] || fail 'Signed release APK app-release.apk is missing.'
+[[ -f "$source_aab" ]] || fail 'Signed release AAB app-release.aab is missing.'
+
+apk_name="MyKhata-${version_name}.apk"
+aab_name="MyKhata-${version_name}.aab"
 
 temporary="$(mktemp -d)"
 trap 'rm -rf "$temporary"' EXIT
 
 # APK: v1/v2/v3 signature verification plus signer identity.
-"$apksigner" verify --verbose --print-certs "$apk" > "$temporary/apksigner.txt" 2>&1 \
+"$apksigner" verify --verbose --print-certs "$source_apk" > "$temporary/apksigner.txt" 2>&1 \
   || { cat "$temporary/apksigner.txt" >&2; fail 'APK signature verification failed.'; }
 apk_digest="$(sed -n 's/.*certificate SHA-256 digest:[[:space:]]*//p' "$temporary/apksigner.txt" \
   | tr -d ':\r\n' | tr '[:lower:]' '[:upper:]' | sed '/^$/d')"
@@ -61,21 +64,21 @@ apk_digest_count="$(printf '%s\n' "$apk_digest" | grep -c . || true)"
 [[ "$apk_digest" == "$expected" ]] || fail 'APK signer identity does not match the pinned keystore certificate.'
 
 # AAB: JAR signature verification plus signer identity. apksigner does not verify AABs.
-"$jarsigner_bin" -verify -verbose:summary "$aab" > "$temporary/jarsigner.txt" 2>&1 \
+"$jarsigner_bin" -verify -verbose:summary "$source_aab" > "$temporary/jarsigner.txt" 2>&1 \
   || { cat "$temporary/jarsigner.txt" >&2; fail 'AAB JAR signature verification failed.'; }
 grep -qi 'jar verified' "$temporary/jarsigner.txt" \
   || fail 'AAB JAR signature verification did not report a verified jar.'
 
-"$keytool_bin" -printcert -jarfile "$aab" > "$temporary/aabcert.txt" 2>&1 \
+"$keytool_bin" -printcert -jarfile "$source_aab" > "$temporary/aabcert.txt" 2>&1 \
   || { cat "$temporary/aabcert.txt" >&2; fail 'AAB signer certificate could not be read.'; }
-aab_digest="$(sed -n 's/^SHA256:[[:space:]]*//p' "$temporary/aabcert.txt" \
+aab_digest="$(sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' "$temporary/aabcert.txt" \
   | tr -d ':\r\n' | tr '[:lower:]' '[:upper:]' | sed '/^$/d')"
 aab_digest_count="$(printf '%s\n' "$aab_digest" | grep -c . || true)"
 [[ "$aab_digest_count" -eq 1 ]] || fail 'AAB must be signed by exactly one certificate.'
 [[ "$aab_digest" == "$expected" ]] || fail 'AAB signer identity does not match the pinned keystore certificate.'
 
 # Package identity and release version from both artifact formats.
-"$aapt2" dump badging "$apk" > "$temporary/badging.txt" 2>&1 \
+"$aapt2" dump badging "$source_apk" > "$temporary/badging.txt" 2>&1 \
   || fail 'APK package metadata could not be read.'
 grep -q "package: name='$package_id' versionCode='$version_code' versionName='$version_name'" \
   "$temporary/badging.txt" \
@@ -87,7 +90,7 @@ curl -fsSL -o "$temporary/bundletool.jar" "$bundletool_url" \
 printf '%s  %s\n' "$bundletool_sha256" "$temporary/bundletool.jar" | sha256sum --check --status \
   || fail 'bundletool checksum verification failed.'
 
-"$java_bin" -jar "$temporary/bundletool.jar" dump manifest --bundle="$aab" \
+"$java_bin" -jar "$temporary/bundletool.jar" dump manifest --bundle="$source_aab" \
   > "$temporary/aab-manifest.xml" 2> "$temporary/bundletool.err" \
   || { cat "$temporary/bundletool.err" >&2; fail 'AAB manifest could not be parsed by bundletool.'; }
 grep -q "package=\"$package_id\"" "$temporary/aab-manifest.xml" \
@@ -99,11 +102,11 @@ grep -q "android:versionName=\"$version_name\"" "$temporary/aab-manifest.xml" \
 
 rm -rf "$verified_dir"
 mkdir -p "$verified_dir"
-cp "$apk" "$verified_dir/app-release.apk"
-cp "$aab" "$verified_dir/app-release.aab"
+cp "$source_apk" "$verified_dir/$apk_name"
+cp "$source_aab" "$verified_dir/$aab_name"
 (
   cd "$verified_dir"
-  sha256sum app-release.apk app-release.aab > SHA256SUMS.txt
+  sha256sum "$apk_name" "$aab_name" > SHA256SUMS.txt
 )
 
 echo 'Verified signed Android release APK and AAB.'

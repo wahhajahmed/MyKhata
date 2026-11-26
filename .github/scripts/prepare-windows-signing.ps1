@@ -19,6 +19,9 @@ if ([string]::IsNullOrWhiteSpace($env:CSC_BASE64)) {
 if ([string]::IsNullOrWhiteSpace($env:CSC_PASSWORD)) {
   Fail 'Required secret MYKHATA_WINDOWS_CSC_PASSWORD is missing.'
 }
+if ([string]::IsNullOrWhiteSpace($env:MYKHATA_WINDOWS_CERT_SHA256)) {
+  Fail 'Required secret MYKHATA_WINDOWS_CERT_SHA256 is missing.'
+}
 
 try {
   $bytes = [Convert]::FromBase64String($env:CSC_BASE64)
@@ -61,12 +64,13 @@ try {
     Fail 'The Windows certificate is not valid for code signing.'
   }
 
-  if (-not [string]::IsNullOrWhiteSpace($env:MYKHATA_WINDOWS_CERT_SHA256)) {
-    $expected = Normalize-WindowsCertificateFingerprint $env:MYKHATA_WINDOWS_CERT_SHA256
-    $actual = Get-WindowsCertificateSha256 -Certificate $certificate
-    if ($actual -ne $expected) {
-      Fail 'The Windows certificate SHA-256 fingerprint does not match the pinned identity.'
-    }
+  $expected = Normalize-WindowsCertificateFingerprint $env:MYKHATA_WINDOWS_CERT_SHA256
+  if ($expected -notmatch '^[0-9A-F]{64}$') {
+    Fail 'MYKHATA_WINDOWS_CERT_SHA256 must be a 64-character SHA-256 fingerprint.'
+  }
+  $actual = Get-WindowsCertificateSha256 -Certificate $certificate
+  if ($actual -ne $expected) {
+    Fail 'The Windows certificate SHA-256 fingerprint does not match the pinned identity.'
   }
 } finally {
   $certificate.Dispose()

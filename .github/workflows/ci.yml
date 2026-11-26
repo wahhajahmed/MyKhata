@@ -76,9 +76,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
       - name: Install Android SDK components
-        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0" platform-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [[ -n "$sdk_root" && -x "$sdk_root/cmdline-tools/latest/bin/sdkmanager" ]]; then
+            sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          elif command -v sdkmanager >/dev/null 2>&1; then
+            sdkmanager="$(command -v sdkmanager)"
+          else
+            echo 'sdkmanager was not found on this runner.' >&2
+            exit 1
+          fi
+          "$sdkmanager" --licenses < <(yes) > /dev/null 2>&1 \
+            || { echo 'Android SDK licenses could not be accepted.' >&2; exit 1; }
+          "$sdkmanager" --install "platforms;android-34" "build-tools;34.0.0" platform-tools
       - run: npm ci --no-audit --no-fund
       - name: Build web assets
         run: npm run build

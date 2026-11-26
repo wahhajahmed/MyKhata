@@ -170,9 +170,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
       - name: Install Android SDK components
-        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0" platform-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [[ -n "$sdk_root" && -x "$sdk_root/cmdline-tools/latest/bin/sdkmanager" ]]; then
+            sdkmanager="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          elif command -v sdkmanager >/dev/null 2>&1; then
+            sdkmanager="$(command -v sdkmanager)"
+          else
+            echo 'sdkmanager was not found on this runner.' >&2
+            exit 1
+          fi
+          "$sdkmanager" --licenses < <(yes) > /dev/null 2>&1 \
+            || { echo 'Android SDK licenses could not be accepted.' >&2; exit 1; }
+          "$sdkmanager" --install "platforms;android-34" "build-tools;34.0.0" platform-tools
       - run: npm ci --no-audit --no-fund
       - run: npm run build
       - run: npx cap sync android
@@ -230,21 +243,41 @@ jobs:
         with:
           path: artifacts
           pattern: '*-verified'
-      - name: Confirm only verified signed artifacts are present
+      - name: Stage and verify release assets
         shell: bash
         env:
           RELEASE_VERSION: ${{ needs['validate-inputs'].outputs.version }}
         run: |
           set -euo pipefail
-          test -f "artifacts/windows-verified/MyKhata Setup $RELEASE_VERSION.exe"
-          test -f 'artifacts/windows-verified/SHA256SUMS.txt'
-          test -f 'artifacts/android-verified/app-release.apk'
-          test -f 'artifacts/android-verified/app-release.aab'
-          test -f 'artifacts/android-verified/SHA256SUMS.txt'
+          windows='artifacts/windows-verified'
+          android='artifacts/android-verified'
+          staged='release-assets'
+          installer="MyKhata Setup $RELEASE_VERSION.exe"
+          apk="MyKhata-$RELEASE_VERSION.apk"
+          aab="MyKhata-$RELEASE_VERSION.aab"
+
+          test -f "$windows/$installer"
+          test -f "$windows/SHA256SUMS.txt"
+          test -f "$android/$apk"
+          test -f "$android/$aab"
+          test -f "$android/SHA256SUMS.txt"
           if find artifacts -type f \( -iname '*unsigned*' -o -iname '*.pfx' -o -iname '*.jks' -o -iname '*.key' -o -iname '*.pem' \) | grep -q .; then
             echo 'Unverified or signing material found in release artifacts.' >&2
             exit 1
           fi
+
+          rm -rf "$staged"
+          mkdir -p "$staged"
+          cp "$windows/$installer" "$staged/$installer"
+          cp "$android/$apk" "$staged/$apk"
+          cp "$android/$aab" "$staged/$aab"
+          cat "$windows/SHA256SUMS.txt" "$android/SHA256SUMS.txt" > "$staged/SHA256SUMS.txt"
+          test "$(wc -l < "$staged/SHA256SUMS.txt")" -eq 3
+          (
+            cd "$staged"
+            sha256sum --check --status SHA256SUMS.txt
+          )
+          test "$(find "$staged" -maxdepth 1 -type f | wc -l)" -eq 4
       - name: Create draft release (never publish)
         uses: softprops/action-gh-release@v2
         with:
@@ -253,9 +286,7 @@ jobs:
           draft: true
           prerelease: false
           generate_release_notes: true
-          files: |
-            artifacts/windows-verified/*
-            artifacts/android-verified/*
+          files: release-assets/*
           body: |
             Draft release created only after the signed release gate passed.
 
