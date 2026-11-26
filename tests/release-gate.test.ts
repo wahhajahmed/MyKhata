@@ -54,6 +54,8 @@ describe('release gate regressions', () => {
       expect(read(script)).toContain('Required secret MYKHATA_WINDOWS_CERT_SHA256 is missing.')
       expect(read(script)).toContain('64-character SHA-256 fingerprint')
     }
+    expect(read('.github/scripts/tests/windows-fingerprint.test.ps1'))
+      .toContain('certutil -user -addstore -f Root')
   })
 
   it('parses indented keytool SHA-256 fingerprints', () => {

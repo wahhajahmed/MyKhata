@@ -124,9 +124,9 @@ try {
   $publicCertificate = $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
   $cer = Join-Path $testRoot 'test-signing-cert.cer'
   [IO.File]::WriteAllBytes($cer, $publicCertificate)
-  certutil -user -addstore Root $cer | Out-Null
+  certutil -user -addstore -f Root $cer | Out-Null
   Assert-True ($LASTEXITCODE -eq 0) 'Could not add the test certificate to CurrentUser Root.'
-  certutil -user -addstore TrustedPublisher $cer | Out-Null
+  certutil -user -addstore -f TrustedPublisher $cer | Out-Null
   Assert-True ($LASTEXITCODE -eq 0) 'Could not add the test certificate to CurrentUser TrustedPublisher.'
   Write-Host '[6/9] Test certificate added to CurrentUser trust stores.'
 
